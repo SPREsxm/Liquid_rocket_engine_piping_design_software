@@ -3,6 +3,10 @@
 #include <cmath>
 #include <algorithm>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // Convective heat transfer correlations for liquid rocket engine applications.
 // Covers single-phase internal flow, regenerative cooling, and nozzle heat transfer.
 

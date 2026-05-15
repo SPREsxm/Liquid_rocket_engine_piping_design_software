@@ -63,8 +63,8 @@ inline double rackettDensity(double T, const CriticalData& cd)
     if (T >= cd.Tc || T <= 0.0) return 0.0;
     double Tr = T / cd.Tc;
     double exponent = std::pow(1.0 - Tr, 2.0 / 7.0);
-    double Zc = cd.Pc * cd.Vc / (8314.0 * cd.Tc);  // R = 8314 J/(kmol·K)
-    double rhoC = cd.Mw / cd.Vc;  // kg/m^3
+    double Zc = cd.Pc * cd.Vc / (8.314 * cd.Tc);  // R = 8.314 J/(mol·K), Vc in m^3/mol
+    double rhoC = cd.Mw / (cd.Vc * 1000.0);  // kg/m^3 (Mw in kg/kmol, Vc in m^3/mol)
     return rhoC / std::pow(Zc, exponent);
 }
 
@@ -74,7 +74,7 @@ inline double yamadaGunnDensity(double T, const CriticalData& cd)
     if (T >= cd.Tc || T <= 0.0) return 0.0;
     double Tr = T / cd.Tc;
     double phi = std::pow(1.0 - Tr, 2.0 / 7.0);
-    double rhoC = cd.Mw / cd.Vc;
+    double rhoC = cd.Mw / (cd.Vc * 1000.0);
     return rhoC / std::pow(cd.Z_RA, phi);
 }
 
@@ -192,7 +192,7 @@ inline double pitzerHeatOfVaporization(double T, const CriticalData& cd)
     double term1 = 7.08 * std::pow(tau, 0.354);
     double term2 = 10.95 * cd.omega * std::pow(tau, 0.456);
     double dH_Jmol = 8.314 * cd.Tc * (term1 + term2);  // J/mol
-    return dH_Jmol / cd.Mw * 1e-3;  // kJ/kg
+    return dH_Jmol / cd.Mw;  // kJ/kg (Mw in kg/kmol = g/mol, R in J/(mol·K))
 }
 
 // ─── #10 Nicola method for liquid thermal conductivity ─────────
@@ -234,7 +234,7 @@ inline double sastriRaoSurfaceTension(double T, const CriticalData& cd)
 
 inline double temperatureDependentDensity(double T, const CriticalData& cd)
 {
-    if (T <= 0.0) return cd.Mw / cd.Vc; // return critical density
+    if (T <= 0.0) return cd.Mw / (cd.Vc * 1000.0); // return critical density
     return yamadaGunnDensity(T, cd);
 }
 

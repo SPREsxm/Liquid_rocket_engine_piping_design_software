@@ -7,6 +7,12 @@ add_executable(lrep_tests
     test_BlockScene.cpp
     test_UndoCommands.cpp
     test_Serialization.cpp
+    test_HeatTransfer.cpp
+    test_ResistanceCoefficients.cpp
+    test_PropellantProperties.cpp
+    test_GasDynamics.cpp
+    test_NumericalMethods.cpp
+    test_FluidStructureInteraction.cpp
 )
 
 target_include_directories(lrep_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
