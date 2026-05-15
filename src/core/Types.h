@@ -4,6 +4,8 @@
 #include <QStringList>
 #include <QVariant>
 
+class QSettings;
+
 enum class PortDirection {
     Input,
     Output
@@ -35,6 +37,33 @@ struct PropertyDescriptor {
     QStringList enumOptions;    // only used when type == Enum
 };
 
+enum class FluidType {
+    LOX,
+    RP1,
+    CH4,
+    LH2,
+    Water
+};
+
+// Approximate room-temperature liquid properties for default solver values.
+// Temperature-dependent properties are computed by PropellantProperties when actual T is supplied.
+struct FluidProperties {
+    double density;   // kg/m^3
+    double viscosity; // Pa*s
+    double bulkModulus; // Pa — for water hammer / wave speed
+};
+
+inline FluidProperties fluidDefaults(FluidType type) {
+    switch (type) {
+    case FluidType::LOX:    return {1141.0, 1.96e-4, 9.6e8};
+    case FluidType::RP1:    return {810.0,  7.5e-4, 1.3e9};
+    case FluidType::CH4:    return {422.0,  1.03e-4, 7.5e8};
+    case FluidType::LH2:    return {70.9,   1.32e-5, 2.3e8};
+    case FluidType::Water:  return {998.0,  1.002e-3, 2.18e9};
+    }
+    return {1000.0, 1.0e-3, 2.0e9}; // fallback
+}
+
 // Solver configuration per architecture doc §2.4
 struct SolverSettings {
     double tolerance = 1e-6;
@@ -48,4 +77,9 @@ struct SolverSettings {
     double targetCourant = 0.9;
     double timeStepSeconds = -1.0;  // -1 = auto
     int gridBaseNodes = 50;
+    double fluidDensity = 1141.0;    // kg/m^3  (LOX default)
+    double fluidViscosity = 1.96e-4; // Pa·s    (LOX default)
+
+    // Read solver settings from QSettings, using struct defaults as fallbacks.
+    static SolverSettings fromQSettings();
 };

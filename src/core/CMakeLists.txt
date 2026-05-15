@@ -1,5 +1,6 @@
 add_library(lrep_core STATIC
     PluginManager.cpp
+    Types.cpp
 )
 
 target_include_directories(lrep_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

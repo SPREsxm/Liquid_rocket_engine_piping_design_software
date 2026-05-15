@@ -21,6 +21,8 @@
 
 namespace ExpressionEngine {
 
+inline bool isAvailable() { return true; }
+
 class Script {
 public:
     Script();
@@ -288,33 +290,65 @@ inline std::unique_ptr<Script> createFluidDynamicsScript()
 
 namespace ExpressionEngine {
 
+inline bool isAvailable() { return false; }
+
 class Script {
 public:
-    bool addVariable(const QString&, double&) { return false; }
-    bool addVariable(const QString&, double&&) { return false; }
-    bool addConstant(const QString&, double) { return false; }
-    bool addStringVariable(const QString&, std::string&) { return false; }
+    bool addVariable(const QString&, double&) {
+        m_error = QStringLiteral("ExprTk not available — recompile with ExprTk support");
+        return false;
+    }
+    bool addVariable(const QString&, double&&) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
+    bool addConstant(const QString&, double) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
+    bool addStringVariable(const QString&, std::string&) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
 
     using ScalarFunc = std::function<double(double)>;
     using ScalarFunc2 = std::function<double(double, double)>;
-    bool addFunction(const QString&, ScalarFunc) { return false; }
-    bool addFunction2(const QString&, ScalarFunc2) { return false; }
+    bool addFunction(const QString&, ScalarFunc) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
+    bool addFunction2(const QString&, ScalarFunc2) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
 
-    bool compile(const QString&) { return false; }
+    bool compile(const QString&) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
     double evaluate() { return 0.0; }
-    QString errorString() const { return QStringLiteral("ExprTk not available"); }
+    QString errorString() const { return m_error.isEmpty() ? QStringLiteral("ExprTk not available") : m_error; }
     bool isValid() const { return false; }
 
-    bool defineScalarFunction(const QString&) { return false; }
+    bool defineScalarFunction(const QString&) {
+        m_error = QStringLiteral("ExprTk not available");
+        return false;
+    }
     double derivative(double, double = 1e-6) { return 0.0; }
     double secondDerivative(double, double = 1e-6) { return 0.0; }
     double integral(double, double, int = 1000) { return 0.0; }
 
     void setMaxLoopIterations(int) {}
     void setMaxRecursionDepth(int) {}
+
+private:
+    QString m_error;
 };
 
-inline std::unique_ptr<Script> createFluidDynamicsScript() { return nullptr; }
+// Still return a valid (though non-functional) object — never nullptr
+inline std::unique_ptr<Script> createFluidDynamicsScript() {
+    return std::make_unique<Script>();
+}
 
 } // namespace ExpressionEngine
 

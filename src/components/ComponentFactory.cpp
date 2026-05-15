@@ -86,10 +86,15 @@ void ComponentFactory::registerBuiltins()
     registerComponent(ComponentDescriptor::createGlobeValve());
     registerComponent(ComponentDescriptor::createBallValve());
     registerComponent(ComponentDescriptor::createSolenoidValve());
+    registerComponent(ComponentDescriptor::createCheckValve());
+    registerComponent(ComponentDescriptor::createButterflyValve());
     registerComponent(ComponentDescriptor::createCentrifugalPump());
     registerComponent(ComponentDescriptor::createPistonPump());
     registerComponent(ComponentDescriptor::createPressureSensor());
     registerComponent(ComponentDescriptor::createFlowSensor());
     registerComponent(ComponentDescriptor::createStorageTank());
     registerComponent(ComponentDescriptor::createBufferTank());
+    registerComponent(ComponentDescriptor::createInjector());
+    registerComponent(ComponentDescriptor::createNozzle());
+    registerComponent(ComponentDescriptor::createDiffuser());
 }

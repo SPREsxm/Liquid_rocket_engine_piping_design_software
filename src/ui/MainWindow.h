@@ -7,6 +7,8 @@ class QPlainTextEdit;
 class QLabel;
 class QAction;
 class QMenu;
+class QDoubleSpinBox;
+class QComboBox;
 class ActionManager;
 class BlockScene;
 class BlockView;
@@ -56,6 +58,7 @@ private:
     // Plugin & solver
     void loadPlugins();
     void runBenchmarks();
+    void applySolutionVisualization(const struct NetworkSolution& sol);
 
     // Recent files
     void addToRecentFiles(const QString& filePath);
@@ -84,6 +87,11 @@ private:
     // Status bar
     QLabel* m_statusLabel = nullptr;
     QLabel* m_zoomLabel   = nullptr;
+
+    // Boundary condition inputs
+    QDoubleSpinBox* m_inletPressureSpin = nullptr;
+    QDoubleSpinBox* m_inletFlowSpin = nullptr;
+    QComboBox* m_fluidTypeCombo = nullptr;
 
     // Recent files
     QMenu* m_recentFilesMenu = nullptr;

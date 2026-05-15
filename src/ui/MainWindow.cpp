@@ -23,8 +23,12 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFormLayout>
+#include <QGroupBox>
 #include <QHash>
 #include <QHBoxLayout>
 #include <QImage>
@@ -211,7 +215,10 @@ void MainWindow::createActions()
     undoAction->setEnabled(false);
     redoAction->setEnabled(false);
 
-    // Delete action
+    // Edit — Cut/Copy/Paste/Delete
+    connect(am.action(ActionId::Cut),  &QAction::triggered, m_blockView, &BlockView::cutSelected);
+    connect(am.action(ActionId::Copy), &QAction::triggered, m_blockView, &BlockView::copySelected);
+    connect(am.action(ActionId::Paste),&QAction::triggered, m_blockView, &BlockView::pasteClipboard);
     connect(am.action(ActionId::Delete), &QAction::triggered, m_blockView, &BlockView::deleteSelected);
 
     // Tools
@@ -300,6 +307,48 @@ void MainWindow::createToolBar()
     m_mainToolBar->addSeparator();
     m_mainToolBar->addAction(am.action(ActionId::ZoomIn));
     m_mainToolBar->addAction(am.action(ActionId::ZoomOut));
+
+    // ── Boundary condition inputs ──
+    m_mainToolBar->addSeparator();
+
+    auto* inletLabel = new QLabel(tr(" P_in:"));
+    m_mainToolBar->addWidget(inletLabel);
+
+    m_inletPressureSpin = new QDoubleSpinBox;
+    m_inletPressureSpin->setRange(0.01, 100.0);
+    m_inletPressureSpin->setDecimals(3);
+    m_inletPressureSpin->setSuffix(" MPa");
+    m_inletPressureSpin->setValue(1.0);  // default 1 MPa
+    m_inletPressureSpin->setToolTip(tr("Inlet total pressure (MPa)"));
+    m_inletPressureSpin->setMaximumWidth(110);
+    m_mainToolBar->addWidget(m_inletPressureSpin);
+
+    auto* flowLabel = new QLabel(tr(" ṁ:"));
+    m_mainToolBar->addWidget(flowLabel);
+
+    m_inletFlowSpin = new QDoubleSpinBox;
+    m_inletFlowSpin->setRange(0.01, 10000.0);
+    m_inletFlowSpin->setDecimals(2);
+    m_inletFlowSpin->setSuffix(" kg/s");
+    m_inletFlowSpin->setValue(10.0);
+    m_inletFlowSpin->setToolTip(tr("Inlet mass flow rate (kg/s)"));
+    m_inletFlowSpin->setMaximumWidth(110);
+    m_mainToolBar->addWidget(m_inletFlowSpin);
+
+    // ── Fluid type selector ──
+    auto* fluidLabel = new QLabel(tr(" Fluid:"));
+    m_mainToolBar->addWidget(fluidLabel);
+
+    m_fluidTypeCombo = new QComboBox;
+    m_fluidTypeCombo->addItem("LOX",       static_cast<int>(FluidType::LOX));
+    m_fluidTypeCombo->addItem("RP-1",      static_cast<int>(FluidType::RP1));
+    m_fluidTypeCombo->addItem("Methane",   static_cast<int>(FluidType::CH4));
+    m_fluidTypeCombo->addItem("LH2",       static_cast<int>(FluidType::LH2));
+    m_fluidTypeCombo->addItem("Water",     static_cast<int>(FluidType::Water));
+    m_fluidTypeCombo->setCurrentIndex(0);
+    m_fluidTypeCombo->setToolTip(tr("Working fluid — sets density and viscosity defaults"));
+    m_fluidTypeCombo->setMaximumWidth(100);
+    m_mainToolBar->addWidget(m_fluidTypeCombo);
 }
 
 // ─── StatusBar ──────────────────────────────────────────────
@@ -509,17 +558,21 @@ void MainWindow::onRunAnalysis()
         return;
     }
 
-    // Load solver settings
-    QSettings settings;
-    SolverSettings solverSettings;
-    solverSettings.tolerance = settings.value("Solver/Tolerance", 1e-6).toDouble();
-    solverSettings.maxIterations = settings.value("Solver/MaxIter", 200).toInt();
-    solverSettings.relaxationFactor = settings.value("Solver/Relaxation", 1.0).toDouble();
-    solverSettings.targetCourant = settings.value("Solver/Courant", 0.9).toDouble();
-    solverSettings.timeStepSeconds = settings.value("Solver/TimeStep", -1.0).toDouble();
-    solverSettings.gridBaseNodes = settings.value("Solver/GridNodes", 50).toInt();
+    SolverSettings solverSettings = SolverSettings::fromQSettings();
 
-    NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings);
+    // Read boundary conditions from toolbar controls
+    const double inletPressurePa = m_inletPressureSpin->value() * 1.0e6; // MPa → Pa
+    const double inletMassFlow = m_inletFlowSpin->value();
+
+    // Set fluid properties from fluid type selector
+    FluidType fType = static_cast<FluidType>(m_fluidTypeCombo->currentData().toInt());
+    auto fProps = fluidDefaults(fType);
+    QSettings settings;
+    solverSettings.fluidDensity = settings.value("Solver/FluidDensity", fProps.density).toDouble();
+    solverSettings.fluidViscosity = settings.value("Solver/FluidViscosity", fProps.viscosity).toDouble();
+
+    NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings,
+                                           inletPressurePa, inletMassFlow);
     appendMessage(sol.message);
 
     // Display results in panel
@@ -531,36 +584,7 @@ void MainWindow::onRunAnalysis()
         return;
     }
 
-    // Flow visualization
-    QHash<QUuid, BlockItem*> blockMap;
-    for (auto* b : m_blockScene->allBlocks())
-        blockMap[b->uuid()] = b;
-
-    double maxFlow = 0.0;
-    for (const auto& edge : sol.edges)
-        maxFlow = std::max(maxFlow, std::abs(edge.massFlowRate));
-
-    for (auto* conn : m_blockScene->allConnections()) {
-        auto* sp = conn->sourcePort();
-        auto* dp = conn->destPort();
-        if (!sp || !dp) continue;
-        auto* sb = sp->parentBlock();
-        auto* db = dp->parentBlock();
-        if (!sb || !db) continue;
-
-        for (const auto& edge : sol.edges) {
-            if (edge.sourceUuid == sb->uuid() &&
-                edge.destUuid == db->uuid()) {
-                conn->setFlowData(std::abs(edge.massFlowRate), maxFlow);
-                break;
-            }
-        }
-    }
-
-    for (const auto& node : sol.nodes) {
-        auto* b = blockMap.value(node.blockUuid);
-        if (b) b->setPressure(node.pressure);
-    }
+    applySolutionVisualization(sol);
 
     m_blockScene->update();
     m_statusLabel->setText(tr("Analysis complete — %1 nodes, %2 edges, ΔP=%3 Pa")
@@ -595,17 +619,21 @@ void MainWindow::onValidate()
 
     // 3. Network solver
     if (!topoResult.hasErrors()) {
-        // Load solver settings
-        QSettings settings;
-        SolverSettings solverSettings;
-        solverSettings.tolerance = settings.value("Solver/Tolerance", 1e-6).toDouble();
-        solverSettings.maxIterations = settings.value("Solver/MaxIter", 200).toInt();
-        solverSettings.relaxationFactor = settings.value("Solver/Relaxation", 1.0).toDouble();
-        solverSettings.targetCourant = settings.value("Solver/Courant", 0.9).toDouble();
-        solverSettings.timeStepSeconds = settings.value("Solver/TimeStep", -1.0).toDouble();
-        solverSettings.gridBaseNodes = settings.value("Solver/GridNodes", 50).toInt();
+        SolverSettings solverSettings = SolverSettings::fromQSettings();
 
-        NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings);
+        // Read boundary conditions from toolbar controls
+        const double inletPressurePa = m_inletPressureSpin->value() * 1.0e6;
+        const double inletMassFlow = m_inletFlowSpin->value();
+
+        // Set fluid properties from fluid type selector
+        FluidType fType = static_cast<FluidType>(m_fluidTypeCombo->currentData().toInt());
+        auto fProps = fluidDefaults(fType);
+        QSettings settings;
+        solverSettings.fluidDensity = settings.value("Solver/FluidDensity", fProps.density).toDouble();
+        solverSettings.fluidViscosity = settings.value("Solver/FluidViscosity", fProps.viscosity).toDouble();
+
+        NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings,
+                                               inletPressurePa, inletMassFlow);
         appendMessage(sol.message);
         if (sol.converged) {
             for (const auto& node : sol.nodes) {
@@ -629,37 +657,7 @@ void MainWindow::onValidate()
             }
 
             // 3b. Flow visualization
-            QHash<QUuid, BlockItem*> blockMap;
-            for (auto* b : m_blockScene->allBlocks())
-                blockMap[b->uuid()] = b;
-
-            double maxFlow = 0.0;
-            for (const auto& edge : sol.edges)
-                maxFlow = std::max(maxFlow, std::abs(edge.massFlowRate));
-
-            for (auto* conn : m_blockScene->allConnections()) {
-                auto* sp = conn->sourcePort();
-                auto* dp = conn->destPort();
-                if (!sp || !dp) continue;
-                auto* sb = sp->parentBlock();
-                auto* db = dp->parentBlock();
-                if (!sb || !db) continue;
-
-                for (const auto& edge : sol.edges) {
-                    if (edge.sourceUuid == sb->uuid() &&
-                        edge.destUuid == db->uuid()) {
-                        conn->setFlowData(std::abs(edge.massFlowRate), maxFlow);
-                        break;
-                    }
-                }
-            }
-
-            for (const auto& node : sol.nodes) {
-                auto* b = blockMap.value(node.blockUuid);
-                if (b) b->setPressure(node.pressure);
-            }
-
-            m_blockScene->update();
+            applySolutionVisualization(sol);
 
             // 3c. Accuracy benchmarks
             runBenchmarks();
@@ -758,6 +756,12 @@ void MainWindow::saveSettings()
     settings.setValue("geometry", saveGeometry());
     settings.setValue("windowState", saveState());
     settings.endGroup();
+
+    settings.beginGroup("BoundaryConditions");
+    settings.setValue("InletPressureMPa", m_inletPressureSpin->value());
+    settings.setValue("InletFlowKgPerS", m_inletFlowSpin->value());
+    settings.setValue("FluidType", m_fluidTypeCombo->currentIndex());
+    settings.endGroup();
 }
 
 void MainWindow::restoreSettings()
@@ -781,6 +785,17 @@ void MainWindow::restoreSettings()
         if (auto* a = m_actionManager->action(ActionId::ToggleProperties)) a->setChecked(m_propertyDock && m_propertyDock->isVisible());
         if (auto* a = m_actionManager->action(ActionId::ToggleMessages)) a->setChecked(m_messageDock && m_messageDock->isVisible());
     }
+
+    // Restore boundary condition values
+    QSettings bcSettings;
+    bcSettings.beginGroup("BoundaryConditions");
+    if (m_inletPressureSpin)
+        m_inletPressureSpin->setValue(bcSettings.value("InletPressureMPa", 1.0).toDouble());
+    if (m_inletFlowSpin)
+        m_inletFlowSpin->setValue(bcSettings.value("InletFlowKgPerS", 10.0).toDouble());
+    if (m_fluidTypeCombo)
+        m_fluidTypeCombo->setCurrentIndex(bcSettings.value("FluidType", 0).toInt());
+    bcSettings.endGroup();
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -812,6 +827,41 @@ void MainWindow::appendMessage(const QString& message)
         m_messageLog->appendPlainText(
             QTime::currentTime().toString("[hh:mm:ss] ") + message);
     }
+}
+
+void MainWindow::applySolutionVisualization(const NetworkSolution& sol)
+{
+    QHash<QUuid, BlockItem*> blockMap;
+    for (auto* b : m_blockScene->allBlocks())
+        blockMap[b->uuid()] = b;
+
+    double maxFlow = 0.0;
+    for (const auto& edge : sol.edges)
+        maxFlow = std::max(maxFlow, std::abs(edge.massFlowRate));
+
+    for (auto* conn : m_blockScene->allConnections()) {
+        auto* sp = conn->sourcePort();
+        auto* dp = conn->destPort();
+        if (!sp || !dp) continue;
+        auto* sb = sp->parentBlock();
+        auto* db = dp->parentBlock();
+        if (!sb || !db) continue;
+
+        for (const auto& edge : sol.edges) {
+            if (edge.sourceUuid == sb->uuid() &&
+                edge.destUuid == db->uuid()) {
+                conn->setFlowData(std::abs(edge.massFlowRate), maxFlow);
+                break;
+            }
+        }
+    }
+
+    for (const auto& node : sol.nodes) {
+        auto* b = blockMap.value(node.blockUuid);
+        if (b) b->setPressure(node.pressure);
+    }
+
+    m_blockScene->update();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)

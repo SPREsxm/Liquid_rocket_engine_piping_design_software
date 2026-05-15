@@ -6,6 +6,7 @@
 #include "components/ComponentDescriptor.h"
 #include "core/Types.h"
 #include "FluidDynamics.h"
+#include "ResistanceCoefficients.h"
 
 #include <QQueue>
 #include <QSet>
@@ -47,21 +48,62 @@ double localResistance(double zeta, double diameter, double density) {
     return zeta / (2.0 * density * A * A);
 }
 
+// Map component type ID to Crane TP-410 FittingType
+ResistanceCoefficients::FittingType fittingTypeForComponent(const QString& typeId) {
+    using RT = ResistanceCoefficients::FittingType;
+    if (typeId == "valve.gate")        return RT::GateValve_FullyOpen;
+    if (typeId == "valve.globe")       return RT::GlobeValve_FullyOpen;
+    if (typeId == "valve.ball")        return RT::BallValve_FullyOpen;
+    if (typeId == "valve.solenoid")    return RT::GateValve_FullyOpen; // solenoid ≈ gate
+    if (typeId == "valve.check")       return RT::SwingCheckValve;
+    if (typeId == "valve.butterfly")   return RT::ButterflyValve;
+    if (typeId == "pipe.elbow")        return RT::Elbow90_Flanged;
+    if (typeId == "pipe.elbow45")      return RT::Elbow45_Flanged;
+    if (typeId == "pipe.tee")          return RT::Tee_Branch;
+    if (typeId == "pipe.teestraight")  return RT::Tee_StraightThrough;
+    // sentinel — caller checks
+    return RT::PipeExit; // never a valid fitting match
+}
+
+// Returns true if this component type is a fitting with Crane Le/D data
+bool isFittingType(const QString& typeId) {
+    static const QSet<QString> fittings = {
+        "valve.gate", "valve.globe", "valve.ball", "valve.solenoid",
+        "valve.check", "valve.butterfly",
+        "pipe.elbow", "pipe.elbow45", "pipe.tee", "pipe.teestraight"
+    };
+    return fittings.contains(typeId);
+}
+
 double computeEdgeResistance(BlockItem* srcBlock, PortItem*,
                              double massFlow, double rho, double mu) {
     const QString& typeId = srcBlock->typeId();
-    const double L   = getProp(srcBlock, "length", 0.3);
     const double d   = getProp(srcBlock, "diameter", kDefaultDiameter);
     const double eps = getProp(srcBlock, "roughness", kDefaultRoughness);
 
+    // Explicit loss coefficient overrides everything
     QVariant zetaV = srcBlock->propertyValue("lossCoefficient");
     if (zetaV.isValid() && zetaV.toDouble() > 0.0)
         return localResistance(zetaV.toDouble(), d, rho);
 
+    // Crane Le/D method for fittings with known geometry
+    if (isFittingType(typeId)) {
+        auto fitting = fittingTypeForComponent(typeId);
+        double led = ResistanceCoefficients::leOverD(fitting, d);
+        if (led > 0.0) {
+            double zeta = ResistanceCoefficients::zetaFromLeD(led, d, eps);
+            if (zeta > 0.0)
+                return localResistance(zeta, d, rho);
+        }
+    }
+
+    // Pipes and straight runs
+    const double L = getProp(srcBlock, "length", 0.3);
     if (typeId.startsWith("pipe.") || L > 0.001)
         return pipeResistance(L, d, eps, rho, mu, massFlow);
 
-    return pipeResistance(0.3, d, eps, rho, mu, massFlow);
+    // Fallback for components without explicit resistance
+    return localResistance(0.5, d, rho); // reasonable default minor loss
 }
 
 // Forward declaration
@@ -119,11 +161,15 @@ double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
     return (totalK > 0.0) ? totalK : 1e-12;
 }
 
-Graph buildGraph(BlockScene* scene) {
+Graph buildGraph(BlockScene* scene, double density = -1.0, double viscosity = -1.0) {
     Graph g;
     g.nodes = scene->allBlocks();
 
-    // Extract fluid properties from blocks that define them
+    // Global overrides from SolverSettings (if provided)
+    if (density > 0.0) g.fluidDensity = density;
+    if (viscosity > 0.0) g.fluidViscosity = viscosity;
+
+    // Extract fluid properties from blocks that define them (per-block overrides)
     for (auto* b : g.nodes) {
         double rho = getProp(b, "density", -1.0);
         double mu  = getProp(b, "viscosity", -1.0);
@@ -188,6 +234,7 @@ void finalizeSolution(NetworkSolution& sol,
         NodeState ns;
         ns.blockUuid = b->uuid();
         ns.blockLabel = b->customLabel().isEmpty() ? b->typeId() : b->customLabel();
+        ns.blockTypeId = b->typeId();
         ns.pressure = pressure.value(b);
         ns.inletFlow = inflow.value(b);
         ns.outletFlow = outflow.value(b);
@@ -533,7 +580,9 @@ NetworkSolution solveHardyCross(const Graph& g,
 // for nonlinear flow resistance.
 NetworkSolution solveMatrix(const Graph& g,
                             double inletPressurePa,
-                            double inletMassFlowKgPerS) {
+                            double inletMassFlowKgPerS,
+                            int maxIter = 500,
+                            double tol = 1e-8) {
     NetworkSolution sol;
     const QList<BlockItem*> inlets = findInlets(g);
 
@@ -589,9 +638,6 @@ NetworkSolution solveMatrix(const Graph& g,
     QVector<double> nodePressure(nNodes, 0.0);
     for (int i : inletNodeIdx)
         nodePressure[i] = inletPressurePa;
-
-    const int maxIter = 500;
-    const double tol = 1e-8;
 
     for (int iter = 0; iter < maxIter; ++iter) {
         double maxError = 0.0;
@@ -686,6 +732,7 @@ NetworkSolution solveMatrix(const Graph& g,
         ns.blockUuid = g.nodes[i]->uuid();
         ns.blockLabel = g.nodes[i]->customLabel().isEmpty()
             ? g.nodes[i]->typeId() : g.nodes[i]->customLabel();
+        ns.blockTypeId = g.nodes[i]->typeId();
         ns.pressure = nodePressure[i];
         ns.inletFlow = 0.0;  // matrix solver doesn't track per-node flow
         ns.outletFlow = 0.0;
@@ -784,16 +831,23 @@ NetworkSolution solveNetworkHardyCross(BlockScene* scene,
         sol.message = QStringLiteral("Invalid or empty network.");
         return sol;
     }
-    Graph g = buildGraph(scene);
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
     return solveHardyCross(g, inletPressurePa, inletMassFlowKgPerS,
                            settings.hardyCrossMaxIter, settings.hardyCrossTolerance);
 }
 
 NetworkSolution solveNetworkMatrix(BlockScene* scene,
-                                   const SolverSettings& /*settings*/,
+                                   const SolverSettings& settings,
                                    double inletPressurePa,
                                    double inletMassFlowKgPerS) {
-    return solveNetworkMatrix(scene, inletPressurePa, inletMassFlowKgPerS);
+    if (!scene || scene->allBlocks().isEmpty() || scene->allConnections().isEmpty()) {
+        NetworkSolution sol;
+        sol.message = QStringLiteral("Invalid or empty network for matrix solver.");
+        return sol;
+    }
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
+    return solveMatrix(g, inletPressurePa, inletMassFlowKgPerS,
+                       settings.matrixSolverMaxIter, settings.matrixSolverTolerance);
 }
 
 NetworkSolution solveNetworkAuto(BlockScene* scene,
@@ -805,7 +859,7 @@ NetworkSolution solveNetworkAuto(BlockScene* scene,
         sol.message = QStringLiteral("Invalid or empty network.");
         return sol;
     }
-    Graph g = buildGraph(scene);
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
     QList<EdgeIdxList> loops = detectLoops(g);
 
     if (loops.isEmpty()) {

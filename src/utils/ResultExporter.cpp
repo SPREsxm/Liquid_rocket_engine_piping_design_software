@@ -18,7 +18,7 @@ bool ResultExporter::exportNodesToCSV(const QList<NodeState>& nodes,
 
     for (const auto& n : nodes) {
         out << '"' << n.blockLabel << '"' << ',';
-        out << ','; // type placeholder
+        out << '"' << n.blockTypeId << '"' << ',';
         out << n.pressure << ',';
         out << (n.pressure / 1.0e6) << ',';
         out << n.inletFlow << ',';

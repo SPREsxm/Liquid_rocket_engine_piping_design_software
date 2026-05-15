@@ -316,3 +316,102 @@ ComponentDescriptor ComponentDescriptor::createBufferTank()
     };
     return cd;
 }
+
+// ─── Check Valve ───────────────────────────────────────────────
+
+ComponentDescriptor ComponentDescriptor::createCheckValve()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "valve.check";
+    cd.displayName = "Check Valve";
+    cd.category = "Valves";
+    cd.description = "A one-way check valve (swing type) — allows flow in one direction only";
+    cd.inputPorts  = { inPort("inlet", "Inlet") };
+    cd.outputPorts = { outPort("outlet", "Outlet") };
+    cd.properties = {
+        prop("diameter",        "Diameter",        PropertyType::Double, 0.05,  0.001, 1.0,   "m"),
+        prop("crackingPressure","Cracking Pressure",PropertyType::Double, 5000.0,0.0,   1.0e7, "Pa"),
+        prop("lossCoefficient", "Loss Coefficient zeta", PropertyType::Double, 1.5, 0.0, 100.0, "")
+    };
+    return cd;
+}
+
+// ─── Butterfly Valve ────────────────────────────────────────────
+
+ComponentDescriptor ComponentDescriptor::createButterflyValve()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "valve.butterfly";
+    cd.displayName = "Butterfly Valve";
+    cd.category = "Valves";
+    cd.description = "A compact quarter-turn butterfly valve for flow control";
+    cd.inputPorts  = { inPort("inlet", "Inlet") };
+    cd.outputPorts = { outPort("outlet", "Outlet") };
+    cd.properties = {
+        prop("diameter",       "Diameter",   PropertyType::Double, 0.1,   0.005, 2.0, "m"),
+        prop("openingAngle",   "Opening",    PropertyType::Double, 90.0,  0.0,   90.0, "deg"),
+        prop("lossCoefficient","Loss Coefficient zeta", PropertyType::Double, 0.8, 0.0, 100.0, "")
+    };
+    return cd;
+}
+
+// ─── Injector / Nozzle / Diffuser ───────────────────────────────
+
+ComponentDescriptor ComponentDescriptor::createInjector()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "chamber.injector";
+    cd.displayName = "Injector Plate";
+    cd.category = "Combustion";
+    cd.description = "A propellant injector — defines chamber entrance boundary for GasDynamics analysis";
+    cd.inputPorts  = { inPort("fuelInlet", "Fuel Inlet"), inPort("oxidInlet", "Oxidizer Inlet") };
+    cd.outputPorts = { outPort("chamber", "To Chamber") };
+    cd.properties = {
+        prop("injectionArea",    "Injection Area",   PropertyType::Double, 0.01,   1e-6,   1.0,    "m^2"),
+        prop("injectionVelocity","Injection Velocity",PropertyType::Double, 30.0,   1.0,    500.0,  "m/s"),
+        prop("mixtureRatio",     "O/F Ratio",        PropertyType::Double, 2.56,   0.5,    10.0,   ""),
+        prop("chamberPressure", "Chamber Pressure",  PropertyType::Double, 7.0e6,  1.0e5,  3.0e7,  "Pa"),
+        prop("diameter",        "Diameter",          PropertyType::Double, 0.1,    0.01,   2.0,    "m")
+    };
+    return cd;
+}
+
+ComponentDescriptor ComponentDescriptor::createNozzle()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "chamber.nozzle";
+    cd.displayName = "Expansion Nozzle";
+    cd.category = "Combustion";
+    cd.description = "A supersonic de Laval nozzle — uses GasDynamics for thrust/area-ratio calculations";
+    cd.inputPorts  = { inPort("inlet", "Chamber Inlet") };
+    cd.outputPorts = { outPort("exit", "Nozzle Exit") };
+    cd.properties = {
+        prop("throatDiameter", "Throat Diameter", PropertyType::Double, 0.05,   0.001, 1.0,   "m"),
+        prop("exitDiameter",   "Exit Diameter",   PropertyType::Double, 0.15,   0.005, 3.0,   "m"),
+        prop("areaRatio",      "Area Ratio (Ae/At)",PropertyType::Double, 9.0,   2.0,   200.0, ""),
+        prop("gamma",          "Specific Heat Ratio γ", PropertyType::Double, 1.2, 1.1,   1.67,  ""),
+        prop("chamberTemp",    "Chamber Temperature",PropertyType::Double, 3500.0, 1500.0, 5000.0,"K"),
+        prop("chamberPressure","Chamber Pressure",  PropertyType::Double, 7.0e6,  1.0e5, 3.0e7, "Pa"),
+        prop("molarMass",      "Molar Mass",        PropertyType::Double, 22.3e-3, 2.0e-3, 0.2, "kg/mol")
+    };
+    return cd;
+}
+
+ComponentDescriptor ComponentDescriptor::createDiffuser()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "chamber.diffuser";
+    cd.displayName = "Subsonic Diffuser";
+    cd.category = "Combustion";
+    cd.description = "A subsonic diffuser for pressure recovery in ramjet/scramjet inlet ducts";
+    cd.inputPorts  = { inPort("inlet", "Supersonic Inlet") };
+    cd.outputPorts = { outPort("exit", "Subsonic Exit") };
+    cd.properties = {
+        prop("inletDiameter",  "Inlet Diameter",   PropertyType::Double, 0.2,    0.01,  5.0,   "m"),
+        prop("exitDiameter",   "Exit Diameter",    PropertyType::Double, 0.4,    0.02,  5.0,   "m"),
+        prop("inletMach",      "Inlet Mach",       PropertyType::Double, 2.0,    0.3,   5.0,   ""),
+        prop("gamma",          "Specific Heat Ratio γ", PropertyType::Double, 1.4, 1.1,  1.67,  ""),
+        prop("efficiency",     "Diffuser Efficiency",PropertyType::Double, 0.85,  0.5,   0.98,  "")
+    };
+    return cd;
+}

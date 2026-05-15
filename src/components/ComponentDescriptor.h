@@ -30,6 +30,8 @@ struct ComponentDescriptor {
     static ComponentDescriptor createGlobeValve();
     static ComponentDescriptor createBallValve();
     static ComponentDescriptor createSolenoidValve();
+    static ComponentDescriptor createCheckValve();
+    static ComponentDescriptor createButterflyValve();
 
     static ComponentDescriptor createCentrifugalPump();
     static ComponentDescriptor createPistonPump();
@@ -39,4 +41,8 @@ struct ComponentDescriptor {
 
     static ComponentDescriptor createStorageTank();
     static ComponentDescriptor createBufferTank();
+
+    static ComponentDescriptor createInjector();
+    static ComponentDescriptor createNozzle();
+    static ComponentDescriptor createDiffuser();
 };

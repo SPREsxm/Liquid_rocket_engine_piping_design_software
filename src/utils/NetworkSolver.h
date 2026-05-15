@@ -16,6 +16,7 @@ class ConnectionItem;
 struct NodeState {
     QUuid blockUuid;
     QString blockLabel;
+    QString blockTypeId;
     double pressure = 0.0;   // Pa (gauge, relative to inlet reference)
     double inletFlow = 0.0;  // kg/s
     double outletFlow = 0.0; // kg/s

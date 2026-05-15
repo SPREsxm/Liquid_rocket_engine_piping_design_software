@@ -2,13 +2,16 @@
 #include "ui/graphics/BlockItem.h"
 #include "components/ComponentDescriptor.h"
 #include "core/Types.h"
+#include "utils/ExpressionEngine.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QWidget>
@@ -147,6 +150,55 @@ void PropertyEditor::rebuildForm(BlockItem* block)
                 block->setPropertyValue(id, v);
             });
             editor = combo;
+            break;
+        }
+        case PropertyType::Expression: {
+            auto* container = new QWidget;
+            auto* hLayout = new QHBoxLayout(container);
+            hLayout->setContentsMargins(0, 0, 0, 0);
+            hLayout->setSpacing(4);
+
+            auto* edit = new QLineEdit;
+            edit->setText(block->propertyValue(prop.id).toString());
+            edit->setPlaceholderText(tr("e.g., 2*P+rho*g*h"));
+
+            auto* statusLabel = new QLabel;
+            statusLabel->setFixedWidth(16);
+
+            auto* compileBtn = new QPushButton(tr("Check"));
+            compileBtn->setFixedWidth(50);
+
+            // Compile on button click
+            connect(compileBtn, &QPushButton::clicked,
+                    edit, [edit, statusLabel]() {
+                if (!ExpressionEngine::isAvailable()) {
+                    statusLabel->setText(QStringLiteral("✘"));
+                    statusLabel->setStyleSheet("color: #E53935; font-weight: bold;");
+                    statusLabel->setToolTip(QStringLiteral("ExprTk not available"));
+                    return;
+                }
+                ExpressionEngine::Script script;
+                if (script.compile(edit->text())) {
+                    statusLabel->setText(QStringLiteral("✔"));
+                    statusLabel->setStyleSheet("color: #43A047; font-weight: bold;");
+                    statusLabel->setToolTip(QStringLiteral("Expression OK"));
+                } else {
+                    statusLabel->setText(QStringLiteral("✘"));
+                    statusLabel->setStyleSheet("color: #E53935; font-weight: bold;");
+                    statusLabel->setToolTip(script.errorString());
+                }
+            });
+
+            // Auto-store to block on text change
+            connect(edit, &QLineEdit::textChanged,
+                    block, [block, id = prop.id](const QString& v) {
+                block->setPropertyValue(id, v);
+            });
+
+            hLayout->addWidget(edit, 1);
+            hLayout->addWidget(compileBtn);
+            hLayout->addWidget(statusLabel);
+            editor = container;
             break;
         }
         }
