@@ -1,7 +1,12 @@
 #pragma once
 
 #include <QString>
+#include <QList>
 #include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // Accuracy benchmark cases per architecture doc §2.4:
 //   "Steady-state flow measurement accuracy ≤0.5% (LH2 ≤1.0%)"

@@ -53,12 +53,12 @@ public:
     void setTargetCourant(double cfl) { m_targetCFL = cfl; }
     double targetCourant() const { return m_targetCFL; }
 
-private:
     double computeWaveSpeed(const PipeSegment &seg) const;
     double frictionSlope(double velocity, double diameter,
                          double roughness, double density, double viscosity) const;
     double computeAdaptiveDt(double waveSpeed, double dx,
                              const std::vector<double>& velocities) const;
 
+private:
     double m_targetCFL = 0.9;
 };

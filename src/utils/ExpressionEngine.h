@@ -9,6 +9,11 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // Expression engine wrapping ExprTk for runtime formula evaluation.
 // Three-component architecture: SymbolTable + Expression + Parser.
@@ -76,9 +81,19 @@ private:
     exprtk::expression<double> m_expression;
     exprtk::parser<double> m_parser;
 
-    // Owned storage for functions (ExprTk needs them alive for expression lifetime)
-    std::vector<std::unique_ptr<ScalarFunc>> m_functions;
-    std::vector<std::unique_ptr<ScalarFunc2>> m_functions2;
+    // IFunction wrappers for stateful std::function (ExprTk needs ifunction<T>&)
+    struct Func1Wrapper : public exprtk::ifunction<double> {
+        ScalarFunc fn;
+        Func1Wrapper(ScalarFunc f) : ifunction<double>(1), fn(std::move(f)) {}
+        double operator()(const double& x) override { return fn(x); }
+    };
+    struct Func2Wrapper : public exprtk::ifunction<double> {
+        ScalarFunc2 fn;
+        Func2Wrapper(ScalarFunc2 f) : ifunction<double>(2), fn(std::move(f)) {}
+        double operator()(const double& x, const double& y) override { return fn(x, y); }
+    };
+    std::vector<std::unique_ptr<Func1Wrapper>> m_functions;
+    std::vector<std::unique_ptr<Func2Wrapper>> m_functions2;
 
     // Owned storage for variables referenced by symbol table
     std::vector<std::pair<QString, double>> m_variableStorage;
@@ -136,29 +151,23 @@ inline bool Script::addStringVariable(const QString& name, std::string& ref)
 
 inline bool Script::addFunction(const QString& name, ScalarFunc func)
 {
-    auto ptr = std::make_unique<ScalarFunc>(std::move(func));
-    auto raw = ptr.get();
-    m_functions.push_back(std::move(ptr));
-
-    if (!m_symbolTable.add_function(name.toStdString(),
-          [raw](double x) { return (*raw)(x); })) {
+    auto ptr = std::make_unique<Func1Wrapper>(std::move(func));
+    if (!m_symbolTable.add_function(name.toStdString(), *ptr)) {
         m_error = QStringLiteral("Failed to add function: %1").arg(name);
         return false;
     }
+    m_functions.push_back(std::move(ptr));
     return true;
 }
 
 inline bool Script::addFunction2(const QString& name, ScalarFunc2 func)
 {
-    auto ptr = std::make_unique<ScalarFunc2>(std::move(func));
-    auto raw = ptr.get();
-    m_functions2.push_back(std::move(ptr));
-
-    if (!m_symbolTable.add_function(name.toStdString(),
-          [raw](double x, double y) { return (*raw)(x, y); })) {
+    auto ptr = std::make_unique<Func2Wrapper>(std::move(func));
+    if (!m_symbolTable.add_function(name.toStdString(), *ptr)) {
         m_error = QStringLiteral("Failed to add function: %1").arg(name);
         return false;
     }
+    m_functions2.push_back(std::move(ptr));
     return true;
 }
 
@@ -166,9 +175,6 @@ inline bool Script::compile(const QString& expression)
 {
     m_compiled = false;
     std::string exprStr = expression.toStdString();
-
-    // Enable flow control, loops
-    m_parser.settings().set_max_number_of_loops(m_maxLoops);
 
     if (!m_parser.compile(exprStr, m_expression)) {
         m_error = QString::fromStdString(m_parser.error());
