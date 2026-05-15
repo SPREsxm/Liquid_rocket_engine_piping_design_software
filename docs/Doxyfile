@@ -1,0 +1,66 @@
+# Doxygen configuration for liquid rocket engine piping design software
+# Generate: doxygen docs/Doxyfile
+
+PROJECT_NAME           = "Liquid Rocket Engine Piping Design"
+PROJECT_BRIEF          = "C++20 / Qt6 piping system CAD for liquid rocket engines"
+PROJECT_VERSION        = 0.1.0
+OUTPUT_DIRECTORY       = docs/html
+CREATE_SUBDIRS         = NO
+OPTIMIZE_OUTPUT_FOR_C  = NO
+OPTIMIZE_OUTPUT_JAVA   = NO
+
+# C++20
+CPP_STANDARD           = 20
+BUILTIN_STL_SUPPORT    = YES
+
+# Input
+INPUT                  = src
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.cpp *.hpp
+EXCLUDE_PATTERNS       = */build/* */tests/* */vcpkg_installed/*
+
+# Qt macros
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = Q_OBJECT= \
+                         Q_PROPERTY(...)= \
+                         Q_DECLARE_METATYPE(...)= \
+                         Q_DECLARE_FLAGS(...)= \
+                         Q_DECLARE_OPERATORS_FOR_FLAGS(...)= \
+                         Q_GADGET= \
+                         signals=public \
+                         slots= \
+                         Q_SIGNALS=public
+
+# Output
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = YES
+
+# Diagrams
+HAVE_DOT               = NO
+CLASS_DIAGRAMS         = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+
+# Warnings
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+# Style
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_INDEX_NUM_ENTRIES = 100
+
+# Search
+SEARCHENGINE           = YES
+SERVER_BASED_SEARCH    = NO
