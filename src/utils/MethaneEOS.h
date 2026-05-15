@@ -108,23 +108,7 @@ inline State computeState(double T_K, double rho_kgm3)
         phi0_tautau += b * (-c * c * e / (dnm * dnm));
     }
 
-    // ─── Residual part ──────────────────────────────────────
-    double phiR = 0.0, phiR_delta = 0.0, phiR_deltadelta = 0.0;
-    double phiR_tau = 0.0, phiR_tautau = 0.0, phiR_deltatau = 0.0;
-
-    for (const auto& c : COEFFS) {
-        double dd = std::pow(delta, c.d - 1);
-        double tt = std::pow(tau, c.t);
-        double term = c.n * std::pow(delta, c.d) * tt;
-
-        if (c.p == 1) {
-            // α = 1 (no Gaussian)
-            phiR += term / c.d * delta; // wait, let me redo this cleaner
-        }
-    }
-
-    // Simplified computation for φR — full SW EOS requires careful handling
-    // of Gaussian/exponential terms. Below is the standard form:
+    // ─── Residual part (simplified SW EOS) ──────────────────
     double phi_r = 0.0, dphi_ddelta = 0.0, d2phi_ddelta2 = 0.0;
     double dphi_dtau = 0.0, d2phi_dtau2 = 0.0, d2phi_ddeltadtau = 0.0;
 

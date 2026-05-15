@@ -44,3 +44,13 @@ TEST_CASE("MathStubs::calculateFrictionFactor turbulent is computed", "[MathStub
     double f = MathStubs::calculateFrictionFactor(1e5, 4.5e-5, 0.05);
     REQUIRE(f > 0.01);
 }
+
+TEST_CASE("MathStubs::calculateFrictionFactor laminar returns 64/Re", "[MathStubs]") {
+    double f = MathStubs::calculateFrictionFactor(1000.0, 4.5e-5, 0.05);
+    REQUIRE(approx(f, 64.0 / 1000.0));
+}
+
+TEST_CASE("MathStubs::calculatePressureDrop zero diameter returns zero", "[MathStubs]") {
+    double dp = MathStubs::calculatePressureDrop(5.0, 0.0, 1e-6, 0.1, 998.0, 0.001);
+    REQUIRE(dp == 0.0);
+}
