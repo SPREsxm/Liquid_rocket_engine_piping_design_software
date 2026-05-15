@@ -1,0 +1,19 @@
+# Clang-tidy config for Liquid Rocket Engine Piping Design Software
+# Run: clang-tidy -p build/ <source.cpp>
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  modernize-use-override,
+  modernize-use-nullptr,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity
+
+CheckOptions:
+  - key: readability-identifier-length.MinimumVariableNameLength
+    value: 2
+  - key: readability-identifier-length.MinimumParameterNameLength
+    value: 2

@@ -1,0 +1,9 @@
+{
+  "name": "liquid-rocket-piping",
+  "version": "0.1.0",
+  "dependencies": [
+    "catch2",
+    "eigen3",
+    "exprtk"
+  ]
+}

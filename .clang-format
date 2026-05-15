@@ -1,0 +1,25 @@
+# Clang-format config for Liquid Rocket Engine Piping Design Software
+# clang-format 15+ (LLVM style base, adjusted for Qt/C++20)
+BasedOnStyle: Google
+IndentWidth: 4
+AccessModifierOffset: -4
+ColumnLimit: 100
+NamespaceIndentation: None
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+PointerAlignment: Left
+IncludeBlocks: Preserve
+SortIncludes: false
+SpaceAfterCStyleCast: true
+SpacesBeforeTrailingComments: 1
+AlignTrailingComments: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackParameters: false
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+Cpp11BracedListStyle: true
+ForEachMacros: ['Q_FOREACH', 'foreach']
+Standard: c++20
+UseTab: Never

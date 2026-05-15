@@ -1,0 +1,50 @@
+# Build output
+build/
+cmake-build-*/
+out/
+bin/
+*.dir/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# MSVC debug databases
+*.vc.db
+*.VC.db
+*.ipdb
+*.iobj
+*.opensdf
+*.sdf
+
+# CMake
+CMakeUserPresets.json
+CMakeLists.txt.user
+build/_deps/
+
+# Qt
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*.moc
+*.pro.user
+aqtinstall.log
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor backups
+*~
+*.swp
+
+# Dependency directories
+vcpkg_installed/
+vcpkg/
