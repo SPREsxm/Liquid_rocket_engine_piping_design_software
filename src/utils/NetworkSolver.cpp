@@ -47,13 +47,12 @@ double localResistance(double zeta, double diameter, double density) {
     return zeta / (2.0 * density * A * A);
 }
 
-double computeEdgeResistance(BlockItem* srcBlock, PortItem*, double massFlow) {
+double computeEdgeResistance(BlockItem* srcBlock, PortItem*,
+                             double massFlow, double rho, double mu) {
     const QString& typeId = srcBlock->typeId();
     const double L   = getProp(srcBlock, "length", 0.3);
     const double d   = getProp(srcBlock, "diameter", kDefaultDiameter);
     const double eps = getProp(srcBlock, "roughness", kDefaultRoughness);
-    const double rho = kDefaultDensity;
-    const double mu  = kDefaultViscosity;
 
     QVariant zetaV = srcBlock->propertyValue("lossCoefficient");
     if (zetaV.isValid() && zetaV.toDouble() > 0.0)
@@ -64,6 +63,12 @@ double computeEdgeResistance(BlockItem* srcBlock, PortItem*, double massFlow) {
 
     return pipeResistance(0.3, d, eps, rho, mu, massFlow);
 }
+
+// Forward declaration
+struct Graph;
+double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
+                                   double massFlow, double rho, double mu,
+                                   const QSet<BlockItem*>& /*visited*/);
 
 // ─── graph building ────────────────────────────────────────────
 
@@ -80,11 +85,51 @@ struct Graph {
     QList<GraphEdge> edges;
     QHash<BlockItem*, QList<int>> outEdges;
     QHash<BlockItem*, QList<int>> inEdges;
+    double fluidDensity = kDefaultDensity;
+    double fluidViscosity = kDefaultViscosity;
 };
+
+double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
+                                   double massFlow, double rho, double mu,
+                                   const QSet<BlockItem*>& /*visited*/) {
+    double totalK = 0.0;
+    BlockItem* current = startBlock;
+    QSet<BlockItem*> localVisited;
+    const int maxDepth = 20;
+    for (int depth = 0; depth < maxDepth; ++depth) {
+        const QList<int>& outIndices = g.outEdges.value(current);
+        if (outIndices.isEmpty()) break;
+        int ei = -1;
+        for (int idx : outIndices) {
+            auto* dst = g.edges[idx].dstBlock;
+            if (!localVisited.contains(dst)) {
+                ei = idx;
+                break;
+            }
+        }
+        if (ei < 0) break;
+        const GraphEdge& ge = g.edges[ei];
+        double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, massFlow, rho, mu);
+        if (K <= 0.0) K = 1e-12;
+        totalK += K;
+        localVisited.insert(current);
+        current = ge.dstBlock;
+        if (current == startBlock) break;
+    }
+    return (totalK > 0.0) ? totalK : 1e-12;
+}
 
 Graph buildGraph(BlockScene* scene) {
     Graph g;
     g.nodes = scene->allBlocks();
+
+    // Extract fluid properties from blocks that define them
+    for (auto* b : g.nodes) {
+        double rho = getProp(b, "density", -1.0);
+        double mu  = getProp(b, "viscosity", -1.0);
+        if (rho > 0.0) g.fluidDensity = rho;
+        if (mu > 0.0)  g.fluidViscosity = mu;
+    }
 
     for (int i = 0; i < g.nodes.size(); ++i) {
         g.outEdges[g.nodes[i]] = {};
@@ -129,6 +174,33 @@ QList<BlockItem*> findInlets(const Graph& g) {
         }
     }
     return inlets;
+}
+
+// Build NodeState list and compute total pressure drop
+void finalizeSolution(NetworkSolution& sol,
+                      const Graph& g,
+                      const QHash<BlockItem*, double>& pressure,
+                      const QHash<BlockItem*, double>& inflow,
+                      const QHash<BlockItem*, double>& outflow,
+                      double inletPressurePa)
+{
+    for (auto* b : g.nodes) {
+        NodeState ns;
+        ns.blockUuid = b->uuid();
+        ns.blockLabel = b->customLabel().isEmpty() ? b->typeId() : b->customLabel();
+        ns.pressure = pressure.value(b);
+        ns.inletFlow = inflow.value(b);
+        ns.outletFlow = outflow.value(b);
+        sol.nodes.append(ns);
+    }
+
+    double pMin = inletPressurePa;
+    for (auto* b : g.nodes) {
+        if (pressure[b] < pMin && !g.outEdges.value(b).isEmpty())
+            pMin = pressure[b];
+    }
+    sol.totalPressureDrop = inletPressurePa - pMin;
+    sol.converged = true;
 }
 
 // ─── BFS forward-propagation solver ────────────────────────────
@@ -176,13 +248,34 @@ NetworkSolution solveGraph(const Graph& g,
         if (outEdgeIndices.isEmpty()) continue;
 
         const int nOut = outEdgeIndices.size();
-        const double flowPerEdge = drivingFlow / nOut;
 
-        for (int ei : outEdgeIndices) {
-            const GraphEdge& ge = g.edges[ei];
+        // Iterative impedance-based flow distribution (2-3 passes)
+        // For each branch, compute total downstream resistance, then split by 1/sqrt(K_total)
+        QList<double> flows(nOut, drivingFlow / nOut);
+        QList<double> branchK(nOut, 0.0);
+        for (int iter = 0; iter < 3; ++iter) {
+            double sumInvSqrtK = 0.0;
+            for (int i = 0; i < nOut; ++i) {
+                const GraphEdge& ge = g.edges[outEdgeIndices[i]];
+                double K0 = computeEdgeResistance(ge.srcBlock, ge.srcPort, flows[i],
+                                                  g.fluidDensity, g.fluidViscosity);
+                double Kdown = computeDownstreamResistance(g, ge.dstBlock, flows[i],
+                                                           g.fluidDensity, g.fluidViscosity, visited);
+                branchK[i] = K0 + Kdown;
+                if (branchK[i] <= 0.0) branchK[i] = 1e-12;
+                sumInvSqrtK += 1.0 / std::sqrt(branchK[i]);
+            }
+            if (sumInvSqrtK <= 0.0) break;
+            for (int i = 0; i < nOut; ++i)
+                flows[i] = drivingFlow * (1.0 / std::sqrt(branchK[i])) / sumInvSqrtK;
+        }
+
+        for (int i = 0; i < nOut; ++i) {
+            const GraphEdge& ge = g.edges[outEdgeIndices[i]];
             auto* dst = ge.dstBlock;
-
-            double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, flowPerEdge);
+            double flowPerEdge = flows[i];
+            double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, flowPerEdge,
+                                             g.fluidDensity, g.fluidViscosity);
             double dp = K * flowPerEdge * flowPerEdge;
             double pDst = pressure[block] - dp;
 
@@ -206,23 +299,7 @@ NetworkSolution solveGraph(const Graph& g,
         }
     }
 
-    for (auto* b : g.nodes) {
-        NodeState ns;
-        ns.blockUuid = b->uuid();
-        ns.blockLabel = b->customLabel().isEmpty() ? b->typeId() : b->customLabel();
-        ns.pressure = pressure.value(b);
-        ns.inletFlow = inflow.value(b);
-        ns.outletFlow = outflow.value(b);
-        sol.nodes.append(ns);
-    }
-
-    double pMin = inletPressurePa;
-    for (auto* b : g.nodes) {
-        if (pressure[b] < pMin && !g.outEdges.value(b).isEmpty())
-            pMin = pressure[b];
-    }
-    sol.totalPressureDrop = inletPressurePa - pMin;
-    sol.converged = true;
+    finalizeSolution(sol, g, pressure, inflow, outflow, inletPressurePa);
     sol.message = QStringLiteral("[BFS] Solved: %1 nodes, %2 edges, Δp_total = %3 Pa")
         .arg(sol.nodes.size()).arg(sol.edges.size())
         .arg(sol.totalPressureDrop, 0, 'f', 1);
@@ -440,22 +517,7 @@ NetworkSolution solveHardyCross(const Graph& g,
         }
     }
 
-    for (auto* b : g.nodes) {
-        NodeState ns;
-        ns.blockUuid = b->uuid();
-        ns.blockLabel = b->customLabel().isEmpty() ? b->typeId() : b->customLabel();
-        ns.pressure = pressure.value(b);
-        ns.inletFlow = totalInflow.value(b);
-        ns.outletFlow = totalOutflow.value(b);
-        sol.nodes.append(ns);
-    }
-
-    double pMin = inletPressurePa;
-    for (auto* b : g.nodes) {
-        if (pressure[b] < pMin && !g.outEdges.value(b).isEmpty())
-            pMin = pressure[b];
-    }
-    sol.totalPressureDrop = inletPressurePa - pMin;
+    finalizeSolution(sol, g, pressure, totalInflow, totalOutflow, inletPressurePa);
     sol.converged = (maxCorrection < tolerance);
 
     sol.message = QStringLiteral("[Hardy-Cross] %1 loops, %2 iterations, %3 nodes, %4 edges, Δp_total = %5 Pa")
@@ -538,7 +600,8 @@ NetworkSolution solveMatrix(const Graph& g,
         for (int j = 0; j < nEdges; ++j) {
             Kvals[j] = computeEdgeResistance(g.edges[j].srcBlock,
                                               g.edges[j].srcPort,
-                                              std::abs(Qvals[j]) + 0.001);
+                                              std::abs(Qvals[j]) + 0.001,
+                                              g.fluidDensity, g.fluidViscosity);
         }
 
         // Propagate pressures forward from inlets
@@ -617,12 +680,15 @@ NetworkSolution solveMatrix(const Graph& g,
         sol.edges.append(es);
     }
 
+    // Build node states — adapted for matrix solver's array-based storage
     for (int i = 0; i < nNodes; ++i) {
         NodeState ns;
         ns.blockUuid = g.nodes[i]->uuid();
         ns.blockLabel = g.nodes[i]->customLabel().isEmpty()
             ? g.nodes[i]->typeId() : g.nodes[i]->customLabel();
         ns.pressure = nodePressure[i];
+        ns.inletFlow = 0.0;  // matrix solver doesn't track per-node flow
+        ns.outletFlow = 0.0;
         sol.nodes.append(ns);
     }
 

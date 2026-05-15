@@ -11,7 +11,7 @@ struct ComponentDescriptor {
     QString displayName;       // e.g. "Straight Pipe"
     QString category;          // e.g. "Pipes"
     QString description;       // tooltip text
-    QString iconName;           // resource path, set later in MVP
+    QString iconName;           // resource path, overridden by category-generated icon if empty
 
     QList<PortDescriptor>     inputPorts;
     QList<PortDescriptor>     outputPorts;

@@ -1,7 +1,6 @@
 #pragma once
 
-// Placeholder calculation functions for MVP.
-// These will be replaced with real ExprTk/Eigen implementations in future versions.
+// Analytical helper functions. Delegates to FluidDynamics for fluid-specific calculations.
 
 namespace MathStubs {
 

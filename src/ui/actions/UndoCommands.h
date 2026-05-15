@@ -3,9 +3,10 @@
 #include <QUndoCommand>
 #include <QUuid>
 #include <QPointF>
-#include <QJsonObject>
 #include <QVariant>
 #include <QString>
+#include <QMap>
+#include <QList>
 
 #include "components/ComponentDescriptor.h"
 
@@ -25,7 +26,6 @@ private:
     ComponentDescriptor m_descriptor;
     QPointF m_position;
     QUuid m_blockUuid;
-    bool m_firstRedo = true;
 };
 
 class RemoveBlockCommand : public QUndoCommand {
@@ -36,9 +36,16 @@ public:
     void redo() override;
 
 private:
+    struct ConnectionData {
+        QString srcUuid, srcPortId, dstUuid, dstPortId;
+    };
     BlockScene* m_scene;
     QUuid m_blockUuid;
-    QJsonObject m_savedState;   // full scene snapshot for undo
+    QString m_savedTypeId;
+    QPointF m_savedPos;
+    QString m_savedLabel;
+    QMap<QString, QVariant> m_savedProps;
+    QList<ConnectionData> m_savedConns;
 };
 
 // ─── Move Block ─────────────────────────────────────────────

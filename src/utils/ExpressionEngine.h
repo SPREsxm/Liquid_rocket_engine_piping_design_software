@@ -26,9 +26,12 @@ public:
     Script();
     ~Script();
 
-    // Register a scalar variable accessible in expressions
+    // Register a scalar variable (external reference — caller manages lifetime)
     // e.g., addVariable("density", &m_density)
     bool addVariable(const QString& name, double& ref);
+
+    // Register a scalar variable with Script-owned storage (no leak)
+    bool addVariable(const QString& name, double&& value);
 
     // Register a constant (immutable in expressions)
     bool addConstant(const QString& name, double value);
@@ -126,6 +129,12 @@ inline bool Script::addVariable(const QString& name, double& ref)
         return false;
     }
     return true;
+}
+
+inline bool Script::addVariable(const QString& name, double&& value)
+{
+    m_variableStorage.emplace_back(name, value);
+    return addVariable(name, m_variableStorage.back().second);
 }
 
 inline bool Script::addConstant(const QString& name, double value)
@@ -254,16 +263,16 @@ inline double Script::integral(double a, double b, int numIntervals)
 inline std::unique_ptr<Script> createFluidDynamicsScript()
 {
     auto s = std::make_unique<Script>();
-    s->addVariable("P",    *new double(0.0)); // caller must manage lifetime
-    s->addVariable("T",    *new double(0.0));
-    s->addVariable("rho",  *new double(0.0));
-    s->addVariable("v",    *new double(0.0));
-    s->addVariable("mdot", *new double(0.0));
-    s->addVariable("d",    *new double(0.0));
-    s->addVariable("L",    *new double(0.0));
-    s->addVariable("mu",   *new double(0.0));
-    s->addVariable("Re",   *new double(0.0));
-    s->addVariable("zeta", *new double(0.0));
+    s->addVariable("P",    0.0);
+    s->addVariable("T",    0.0);
+    s->addVariable("rho",  0.0);
+    s->addVariable("v",    0.0);
+    s->addVariable("mdot", 0.0);
+    s->addVariable("d",    0.0);
+    s->addVariable("L",    0.0);
+    s->addVariable("mu",   0.0);
+    s->addVariable("Re",   0.0);
+    s->addVariable("zeta", 0.0);
     s->addConstant("pi", M_PI);
     s->addConstant("g0", 9.80665);
     return s;
@@ -282,6 +291,7 @@ namespace ExpressionEngine {
 class Script {
 public:
     bool addVariable(const QString&, double&) { return false; }
+    bool addVariable(const QString&, double&&) { return false; }
     bool addConstant(const QString&, double) { return false; }
     bool addStringVariable(const QString&, std::string&) { return false; }
 

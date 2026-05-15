@@ -6,6 +6,7 @@ class QDockWidget;
 class QPlainTextEdit;
 class QLabel;
 class QAction;
+class QMenu;
 class ActionManager;
 class BlockScene;
 class BlockView;
@@ -13,6 +14,7 @@ class ComponentFactory;
 class LibraryTreeView;
 class LibraryTreeModel;
 class PropertyEditor;
+class SolverResultsPanel;
 class QUndoStack;
 
 class MainWindow : public QMainWindow {
@@ -47,12 +49,18 @@ private:
     void onZoomFit();
 
     // Tools
+    void onRunAnalysis();
     void onValidate();
     void onPreferences();
 
     // Plugin & solver
     void loadPlugins();
     void runBenchmarks();
+
+    // Recent files
+    void addToRecentFiles(const QString& filePath);
+    void updateRecentFilesMenu();
+    void openRecentFile();
 
     // Help
     void onAbout();
@@ -71,9 +79,14 @@ private:
     QDockWidget* m_libraryDock    = nullptr;
     QDockWidget* m_propertyDock   = nullptr;
     QDockWidget* m_messageDock    = nullptr;
+    SolverResultsPanel* m_resultsDock = nullptr;
 
     // Status bar
     QLabel* m_statusLabel = nullptr;
+    QLabel* m_zoomLabel   = nullptr;
+
+    // Recent files
+    QMenu* m_recentFilesMenu = nullptr;
 
     // Message log
     QPlainTextEdit* m_messageLog = nullptr;

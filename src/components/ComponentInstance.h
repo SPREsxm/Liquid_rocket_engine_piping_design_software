@@ -15,9 +15,10 @@ struct ComponentInstance {
     QString customLabel;
 
     static ComponentInstance create(const ComponentDescriptor& desc,
-                                    const QPointF& pos = {}) {
+                                    const QPointF& pos = {},
+                                    const QUuid& forcedUuid = {}) {
         ComponentInstance inst;
-        inst.uuid = QUuid::createUuid();
+        inst.uuid = forcedUuid.isNull() ? QUuid::createUuid() : forcedUuid;
         inst.typeId = desc.typeId;
         inst.position = pos;
         for (const auto& prop : desc.properties) {

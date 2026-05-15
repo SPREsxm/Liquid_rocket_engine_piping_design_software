@@ -22,16 +22,9 @@ AddBlockCommand::AddBlockCommand(BlockScene* scene, const ComponentDescriptor& d
 
 void AddBlockCommand::redo()
 {
-    if (m_firstRedo) {
-        auto* block = m_scene->addBlock(m_descriptor, m_position);
+    auto* block = m_scene->addBlock(m_descriptor, m_position, m_blockUuid);
+    if (m_blockUuid.isNull())
         m_blockUuid = block->uuid();
-        m_firstRedo = false;
-    } else {
-        // Re-add from saved descriptor
-        m_scene->addBlock(m_descriptor, m_position);
-        // The new block gets a new UUID — we need to restore the original UUID
-        // For simplicity in MVP, we re-serialize the scene state
-    }
 }
 
 void AddBlockCommand::undo()
@@ -51,20 +44,51 @@ RemoveBlockCommand::RemoveBlockCommand(BlockScene* scene, const QUuid& blockUuid
     , m_blockUuid(blockUuid)
 {
     setText(QObject::tr("Remove block"));
-    m_savedState = m_scene->toJson();
+    auto* block = m_scene->blockByUuid(blockUuid);
+    if (!block) return;
+
+    m_savedTypeId = block->typeId();
+    m_savedPos = block->pos();
+    m_savedLabel = block->customLabel();
+    for (const auto& prop : block->descriptor().properties) {
+        QVariant v = block->propertyValue(prop.id);
+        if (v.isValid()) m_savedProps[prop.id] = v;
+    }
+    for (auto* conn : m_scene->allConnections()) {
+        auto* sp = conn->sourcePort();
+        auto* dp = conn->destPort();
+        if (!sp || !dp) continue;
+        auto* sb = sp->parentBlock();
+        auto* db = dp->parentBlock();
+        if (sb == block || db == block)
+            m_savedConns.append({sb->uuid().toString(), sp->portId(),
+                                 db->uuid().toString(), dp->portId()});
+    }
 }
 
 void RemoveBlockCommand::redo()
 {
     auto* block = m_scene->blockByUuid(m_blockUuid);
-    if (block) {
-        m_scene->removeBlock(block);
-    }
+    if (block) m_scene->removeBlock(block);
 }
 
 void RemoveBlockCommand::undo()
 {
-    m_scene->fromJson(m_savedState);
+    const auto* desc = m_scene->factory()->descriptorForType(m_savedTypeId);
+    if (!desc) return;
+    auto* block = m_scene->addBlock(*desc, m_savedPos, m_blockUuid);
+    block->setCustomLabel(m_savedLabel);
+    for (auto it = m_savedProps.begin(); it != m_savedProps.end(); ++it)
+        block->setPropertyValue(it.key(), it.value());
+    for (const auto& cd : m_savedConns) {
+        auto* sb = m_scene->blockByUuid(QUuid::fromString(cd.srcUuid));
+        auto* db = m_scene->blockByUuid(QUuid::fromString(cd.dstUuid));
+        if (sb && db) {
+            auto* sp = sb->portById(cd.srcPortId);
+            auto* dp = db->portById(cd.dstPortId);
+            if (sp && dp) m_scene->addConnection(sp, dp);
+        }
+    }
 }
 
 // ─── MoveBlockCommand ───────────────────────────────────────

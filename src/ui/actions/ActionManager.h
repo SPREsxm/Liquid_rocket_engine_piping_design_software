@@ -27,7 +27,9 @@ enum class ActionId {
     ToggleLibrary,
     ToggleProperties,
     ToggleMessages,
+    ToggleGrid,
     // Tools
+    RunAnalysis,
     Validate,
     Preferences,
     // Help

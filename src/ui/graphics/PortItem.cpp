@@ -1,5 +1,6 @@
 #include "PortItem.h"
 #include "BlockItem.h"
+#include "core/Types.h"
 
 #include <QCursor>
 #include <QPainter>
@@ -55,7 +56,13 @@ void PortItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
 {
     painter->setRenderHint(QPainter::Antialiasing);
 
-    QColor fill = BlockAppearance::portFillColor();
+    QColor fill;
+    switch (m_dataType) {
+    case PortDataType::Fluid:       fill = QColor("#1565C0"); break; // Blue
+    case PortDataType::Mechanical:  fill = QColor("#E65100"); break; // Orange
+    case PortDataType::Signal:      fill = QColor("#2E7D32"); break; // Green
+    default:                        fill = QColor("#FFFFFF"); break;
+    }
     QColor border = BlockAppearance::portBorderColor();
 
     if (m_highlighted || m_isConnected) {

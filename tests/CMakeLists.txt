@@ -22,6 +22,9 @@ add_executable(lrep_tests
     test_NetworkSolver.cpp
     test_TransientSolver.cpp
     test_ExpressionEngine.cpp
+    test_NetworkValidator.cpp
+    test_IdGenerator.cpp
+    test_Constants.cpp
 )
 
 target_include_directories(lrep_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")

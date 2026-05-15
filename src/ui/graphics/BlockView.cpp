@@ -16,6 +16,7 @@
 #include <QJsonValue>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QSet>
@@ -24,6 +25,7 @@
 
 BlockView::BlockView(BlockScene* scene, QWidget* parent)
     : QGraphicsView(scene, parent)
+    , m_scene(scene)
 {
     setRenderHint(QPainter::Antialiasing);
     setRenderHint(QPainter::SmoothPixmapTransform);
@@ -38,6 +40,17 @@ BlockView::BlockView(BlockScene* scene, QWidget* parent)
     setMinimumSize(400, 300);
 }
 
+void BlockView::setGridVisible(bool visible)
+{
+    m_gridVisible = visible;
+    viewport()->update();
+}
+
+bool BlockView::isGridVisible() const
+{
+    return m_gridVisible;
+}
+
 void BlockView::zoomIn()
 {
     applyZoom(AppConstants::ZOOM_STEP, viewport()->rect().center());
@@ -50,7 +63,7 @@ void BlockView::zoomOut()
 
 void BlockView::zoomToFit()
 {
-    const auto blocks = static_cast<BlockScene*>(scene())->allBlocks();
+    const auto blocks = m_scene->allBlocks();
     if (blocks.isEmpty()) {
         resetTransform();
         m_currentZoom = 1.0;
@@ -75,24 +88,22 @@ void BlockView::zoomToFit()
 
 void BlockView::deleteSelected()
 {
-    auto* bs = static_cast<BlockScene*>(scene());
     auto selected = scene()->selectedItems();
 
     for (auto* item : selected) {
         if (auto* conn = qgraphicsitem_cast<ConnectionItem*>(item)) {
-            bs->removeConnection(conn);
+            m_scene->removeConnection(conn);
         }
     }
     for (auto* item : selected) {
         if (auto* block = qgraphicsitem_cast<BlockItem*>(item)) {
-            bs->removeBlock(block);
+            m_scene->removeBlock(block);
         }
     }
 }
 
 void BlockView::copySelected()
 {
-    auto* bs = static_cast<BlockScene*>(scene());
     auto selected = scene()->selectedItems();
 
     QJsonArray blocksArr;
@@ -119,7 +130,7 @@ void BlockView::copySelected()
 
     // Also include connections where both endpoints are in the selected set
     QJsonArray connsArr;
-    for (auto* conn : bs->allConnections()) {
+    for (auto* conn : m_scene->allConnections()) {
         auto* sp = conn->sourcePort();
         auto* dp = conn->destPort();
         if (sp && dp && selectedUuids.contains(sp->parentBlock()->uuid())
@@ -158,8 +169,7 @@ void BlockView::pasteClipboard()
         mime->data(AppConstants::MIME_BLOCK_CLIPBOARD));
     if (!doc.isObject()) return;
 
-    auto* bs = static_cast<BlockScene*>(scene());
-    ComponentFactory* cf = bs->factory();
+    ComponentFactory* cf = m_scene->factory();
 
     // Clear current selection
     for (auto* item : scene()->selectedItems())
@@ -183,7 +193,7 @@ void BlockView::pasteClipboard()
         QPointF pos(b["x"].toDouble() + offset.x(),
                     b["y"].toDouble() + offset.y());
 
-        BlockItem* block = bs->addBlock(*desc, pos);
+        BlockItem* block = m_scene->addBlock(*desc, pos);
         if (!block) continue;
 
         QString oldUuid = b["uuid"].toString();
@@ -207,14 +217,14 @@ void BlockView::pasteClipboard()
         QUuid newDst = uuidMap.value(c["dstUuid"].toString());
         if (newSrc.isNull() || newDst.isNull()) continue;
 
-        BlockItem* srcBlock = bs->blockByUuid(newSrc);
-        BlockItem* dstBlock = bs->blockByUuid(newDst);
+        BlockItem* srcBlock = m_scene->blockByUuid(newSrc);
+        BlockItem* dstBlock = m_scene->blockByUuid(newDst);
         if (!srcBlock || !dstBlock) continue;
 
         PortItem* srcPort = srcBlock->portById(c["srcPort"].toString());
         PortItem* dstPort = dstBlock->portById(c["dstPort"].toString());
         if (srcPort && dstPort) {
-            bs->addConnection(srcPort, dstPort);
+            m_scene->addConnection(srcPort, dstPort);
         }
     }
 }
@@ -232,6 +242,42 @@ void BlockView::applyZoom(double factor, QPointF centerPoint)
     centerOn(scenePt);
 
     emit zoomChanged(m_currentZoom);
+}
+
+void BlockView::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::MiddleButton) {
+        m_isPanning = true;
+        m_lastPanPoint = event->pos();
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    QGraphicsView::mousePressEvent(event);
+}
+
+void BlockView::mouseMoveEvent(QMouseEvent* event)
+{
+    if (m_isPanning) {
+        QPointF delta = event->pos() - m_lastPanPoint;
+        m_lastPanPoint = event->pos();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        event->accept();
+        return;
+    }
+    QGraphicsView::mouseMoveEvent(event);
+}
+
+void BlockView::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::MiddleButton && m_isPanning) {
+        m_isPanning = false;
+        setCursor(Qt::ArrowCursor);
+        event->accept();
+        return;
+    }
+    QGraphicsView::mouseReleaseEvent(event);
 }
 
 void BlockView::wheelEvent(QWheelEvent* event)
@@ -328,6 +374,8 @@ void BlockView::keyPressEvent(QKeyEvent* event)
 void BlockView::drawBackground(QPainter* painter, const QRectF& rect)
 {
     QGraphicsView::drawBackground(painter, rect);
+
+    if (!m_gridVisible) return;
 
     painter->setPen(QPen(QColor("#E0E0E0"), 0.5));
 

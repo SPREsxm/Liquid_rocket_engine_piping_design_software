@@ -60,5 +60,28 @@ public:
                              const std::vector<double>& velocities) const;
 
 private:
+    struct PipeParams {
+        double diameter = 0.0254;
+        double roughness = 0.000045;
+        double density = 1141.0;
+        double viscosity = 1.96e-4;
+        double bulkModulus = 1.0e9;
+        double youngsModulus = 2.0e11;
+        double wallThickness = 0.00127;
+        double inletPressure = 1.0e6;
+        double initialVelocity = 0.0;
+        double waveSpeed = 0.0;
+    };
+
+    PipeParams preparePipeParams(const NetworkSolution& steady,
+                                  BlockScene* scene,
+                                  int spatialNodes) const;
+    QString formatWaterHammerMessage(const PipeParams& pp,
+                                      int pathBlocks, double totalLength,
+                                      double closureTime,
+                                      int spatialNodes, int totalSteps,
+                                      double dt, double maxPressure,
+                                      double maxPressureTime) const;
+
     double m_targetCFL = 0.9;
 };

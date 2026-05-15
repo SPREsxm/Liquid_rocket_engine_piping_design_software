@@ -152,6 +152,83 @@ double TransientSolver::computeAdaptiveDt(
     return std::max(dt, 1.0e-7);
 }
 
+TransientSolver::PipeParams TransientSolver::preparePipeParams(
+    const NetworkSolution& steady, BlockScene* scene, int /*spatialNodes*/) const
+{
+    PipeParams pp;
+
+    // Extract from path blocks for fluid/material properties
+    QHash<QUuid, BlockItem*> blockMap;
+    for (auto* b : scene->allBlocks())
+        blockMap[b->uuid()] = b;
+
+    for (const auto& edge : steady.edges) {
+        auto* b = blockMap.value(edge.sourceUuid);
+        if (!b) continue;
+
+        double d = getBlockProp(b, "diameter", -1.0);
+        if (d > 0.0) {
+            pp.diameter = d;
+            pp.wallThickness = d / 20.0;
+        }
+        double r = getBlockProp(b, "roughness", -1.0);
+        if (r >= 0.0) pp.roughness = r;
+
+        QVariant mat = b->propertyValue("material");
+        if (mat.isValid()) {
+            const auto modMap = materialModulus();
+            auto it = modMap.find(mat.toString());
+            if (it != modMap.end()) pp.youngsModulus = it.value();
+        }
+        break; // use first pipe block
+    }
+
+    // Find inlet pressure from steady solution
+    for (const auto& node : steady.nodes) {
+        if (node.pressure > pp.inletPressure * 0.1)
+            pp.inletPressure = node.pressure + steady.totalPressureDrop;
+    }
+
+    // Compute velocity from mass flow
+    if (!steady.edges.isEmpty()) {
+        double massFlow = std::abs(steady.edges.first().massFlowRate);
+        double area = M_PI * pp.diameter * pp.diameter / 4.0;
+        pp.initialVelocity = massFlow / (pp.density * area);
+        if (pp.initialVelocity < 0.01) pp.initialVelocity = 5.0;
+    }
+
+    return pp;
+}
+
+QString TransientSolver::formatWaterHammerMessage(
+    const PipeParams& pp, int pathBlocks, double totalLength,
+    double closureTime, int spatialNodes, int totalSteps,
+    double dt, double maxPressure, double maxPressureTime) const
+{
+    double maxPressureMPa = maxPressure / 1.0e6;
+    double joukowsky = pp.density * pp.waveSpeed * pp.initialVelocity;
+
+    return QStringLiteral(
+        "Water hammer simulation complete:\n"
+        "  Path: %1 blocks, L=%2 m, d=%3 mm, c=%4 m/s\n"
+        "  Initial velocity: %5 m/s, Closure time: %6 s\n"
+        "  Grid: N=%7, dt=%8 ms, steps=%9\n"
+        "  Max pressure: %10 MPa at t=%11 ms\n"
+        "  Joukowsky estimate: %12 MPa (Δp=ρcΔv)")
+        .arg(pathBlocks)
+        .arg(totalLength, 0, 'f', 2)
+        .arg(pp.diameter * 1000.0, 0, 'f', 1)
+        .arg(pp.waveSpeed, 0, 'f', 1)
+        .arg(pp.initialVelocity, 0, 'f', 2)
+        .arg(closureTime, 0, 'f', 3)
+        .arg(spatialNodes)
+        .arg(dt * 1000.0, 0, 'f', 3)
+        .arg(totalSteps)
+        .arg(maxPressureMPa, 0, 'f', 3)
+        .arg(maxPressureTime * 1000.0, 0, 'f', 1)
+        .arg(joukowsky / 1.0e6, 0, 'f', 3);
+}
+
 TransientResult TransientSolver::simulateWaterHammer(
     const NetworkSolution &steady,
     BlockScene *scene,
@@ -182,78 +259,27 @@ TransientResult TransientSolver::simulateWaterHammer(
     if (spatialNodes < 10) spatialNodes = 50;
     if (spatialNodes > 500) spatialNodes = 200;
 
-    // 2. Aggregate pipe parameters (equivalent uniform pipe for simplicity)
-    double diameter = kDefaultDiameter;
-    double roughness = kDefaultRoughness;
-    double density = kDefaultRho;
-    double viscosity = kDefaultMu;
-    double bulkModulus = kDefaultK;
-    double youngsModulus = 2.0e11; // default 316L
-    double wallThickness = diameter / 20.0;
-
-    // Extract from first pipe block in path for fluid/material properties
-    for (auto *b : pathBlocks) {
-        double d = getBlockProp(b, "diameter", -1.0);
-        if (d > 0.0) {
-            diameter = d;
-            wallThickness = d / 20.0;
-        }
-        double r = getBlockProp(b, "roughness", -1.0);
-        if (r >= 0.0) roughness = r;
-
-        // Material lookup
-        QVariant mat = b->propertyValue("material");
-        if (mat.isValid()) {
-            const auto modMap = materialModulus();
-            auto it = modMap.find(mat.toString());
-            if (it != modMap.end()) youngsModulus = it.value();
-        }
-    }
-
-    // Use LOX properties as default for liquid rocket context
-    bulkModulus = kDefaultK;
-    density = kDefaultRho;
-    viscosity = kDefaultMu;
+    // 2. Extract pipe parameters and initial conditions
+    PipeParams pp = preparePipeParams(steady, scene, spatialNodes);
 
     // 3. Compute wave speed
-    double c = computeWaveSpeed({totalLength, diameter, wallThickness,
-                                  youngsModulus, roughness,
-                                  density, viscosity, bulkModulus});
-    if (c <= 0.0) {
+    pp.waveSpeed = computeWaveSpeed({totalLength, pp.diameter, pp.wallThickness,
+                                      pp.youngsModulus, pp.roughness,
+                                      pp.density, pp.viscosity, pp.bulkModulus});
+    if (pp.waveSpeed <= 0.0) {
         result.message = QStringLiteral("Transient: invalid wave speed.");
         return result;
     }
 
-    // 4. Find inlet pressure and initial velocity from steady solution
-    double inletPressure = 1.0e6; // default 1 MPa
-    double initialVelocity = 0.0;
-
-    for (const auto &node : steady.nodes) {
-        if (node.pressure > inletPressure * 0.1)
-            inletPressure = node.pressure + steady.totalPressureDrop;
-    }
-
-    // Compute velocity from mass flow
-    if (!steady.edges.isEmpty()) {
-        double massFlow = std::abs(steady.edges.first().massFlowRate);
-        double area = M_PI * diameter * diameter / 4.0;
-        initialVelocity = massFlow / (density * area);
-        if (initialVelocity < 0.01) initialVelocity = 5.0; // reasonable default
-    }
-
-    // 5. Discretization: Courant condition dt = dx / c
+    // 4. Discretization: Courant condition
     double dx = totalLength / spatialNodes;
-
-    // Compute time step: user-specified, or auto CFL
     double dt;
     if (timeStepSeconds > 0.0) {
         dt = timeStepSeconds;
-        // Ensure CFL constraint is met: dt must satisfy (|v|+c)*dt/dx ≤ 1
-        double maxV = initialVelocity;
-        double dtCFL = m_targetCFL * dx / (maxV + c);
+        double dtCFL = m_targetCFL * dx / (pp.initialVelocity + pp.waveSpeed);
         if (dt > dtCFL) dt = dtCFL;
     } else {
-        dt = dx / c * m_targetCFL;
+        dt = dx / pp.waveSpeed * m_targetCFL;
     }
 
     double simTime = closureTime * 2.5;
@@ -264,59 +290,43 @@ TransientResult TransientSolver::simulateWaterHammer(
     result.spatialNodes = spatialNodes;
     result.timeSteps = totalSteps;
 
-    // 6. MOC solver initialization
-    std::vector<double> p(spatialNodes + 1, inletPressure);  // pressure
-    std::vector<double> v(spatialNodes + 1, initialVelocity); // velocity
+    // 5. MOC state initialization
+    std::vector<double> p(spatialNodes + 1, pp.inletPressure);
+    std::vector<double> v(spatialNodes + 1, pp.initialVelocity);
     std::vector<double> pNew(spatialNodes + 1);
     std::vector<double> vNew(spatialNodes + 1);
 
-    const double rho_c = density * c;
-    double maxPressure = inletPressure;
+    const double rho_c = pp.density * pp.waveSpeed;
+    double maxPressure = pp.inletPressure;
     double maxPressureTime = 0.0;
 
-    // 7. Time stepping
+    // 6. Time stepping (Method of Characteristics)
     for (int step = 0; step < totalSteps; ++step) {
         double t = step * dt;
 
-        // Interior nodes (i = 1 .. N-1): C+ and C- characteristics
+        // Interior nodes: C+ from i-1, C- from i+1
         for (int i = 1; i < spatialNodes; ++i) {
-            // C+: from i-1
-            double fA = frictionSlope(v[i - 1], diameter, roughness, density, viscosity);
+            double fA = frictionSlope(v[i - 1], pp.diameter, pp.roughness, pp.density, pp.viscosity);
             double cp = p[i - 1] + rho_c * v[i - 1] - rho_c * fA * dx;
 
-            // C-: from i+1
-            double fB = frictionSlope(v[i + 1], diameter, roughness, density, viscosity);
+            double fB = frictionSlope(v[i + 1], pp.diameter, pp.roughness, pp.density, pp.viscosity);
             double cm = p[i + 1] - rho_c * v[i + 1] + rho_c * fB * dx;
 
             pNew[i] = 0.5 * (cp + cm);
             vNew[i] = 0.5 * (cp - cm) / rho_c;
         }
 
-        // Upstream boundary (i = 0): constant pressure reservoir
-        pNew[0] = inletPressure;
-        double f0 = frictionSlope(v[1], diameter, roughness, density, viscosity);
-        double cm0 = p[1] - rho_c * v[1] + rho_c * f0 * dx;
+        // Upstream boundary: constant pressure reservoir
+        pNew[0] = pp.inletPressure;
+        double cm0 = p[1] - rho_c * v[1] + rho_c * frictionSlope(v[1], pp.diameter, pp.roughness, pp.density, pp.viscosity) * dx;
         vNew[0] = (pNew[0] - cm0) / rho_c;
 
-        // Downstream boundary (i = N): closing valve
+        // Downstream boundary: closing valve
         int N = spatialNodes;
-        double fN = frictionSlope(v[N - 1], diameter, roughness, density, viscosity);
-        double cpN = p[N - 1] + rho_c * v[N - 1] - rho_c * fN * dx;
+        double cpN = p[N - 1] + rho_c * v[N - 1] - rho_c * frictionSlope(v[N - 1], pp.diameter, pp.roughness, pp.density, pp.viscosity) * dx;
 
-        // Valve closure: linear ramp from initial velocity to 0
-        double valveFraction = 1.0;
-        if (t < closureTime)
-            valveFraction = 1.0 - t / closureTime;
-        else
-            valveFraction = 0.0;
-
-        // Valve characteristic: Δp = K_v * (τ * v)²
-        // When fully open: v = initialVelocity, pressure ~ inlet
-        // When closing: v approaches 0, causing pressure surge
-        double valveVelocity = initialVelocity * valveFraction * valveFraction;
-        vNew[N] = valveVelocity;
-
-        // Pressure from C+ characteristic with valve velocity
+        double valveFraction = (t < closureTime) ? (1.0 - t / closureTime) : 0.0;
+        vNew[N] = pp.initialVelocity * valveFraction * valveFraction;
         pNew[N] = cpN - rho_c * vNew[N];
 
         // Track maximum pressure
@@ -327,23 +337,18 @@ TransientResult TransientSolver::simulateWaterHammer(
             }
         }
 
-        // Adaptive CFL: recompute dt every 10 steps based on current velocities
+        // Adaptive CFL every 10 steps
         if (step % 10 == 0 && timeStepSeconds <= 0.0) {
-            double newDt = computeAdaptiveDt(c, dx, vNew);
+            double newDt = computeAdaptiveDt(pp.waveSpeed, dx, vNew);
             dt = std::max(newDt, 1.0e-7);
-            dt = std::min(dt, dx / c);
+            dt = std::min(dt, dx / pp.waveSpeed);
         }
 
-        // Record state every 20 steps to keep history manageable
+        // Record state
         if (step % 20 == 0 || step == totalSteps - 1) {
-            TransientState state;
-            state.time = t;
-            state.pressures = pNew;
-            state.velocities = vNew;
-            result.history.push_back(state);
+            result.history.push_back({t, pNew, vNew});
         }
 
-        // Swap buffers
         p.swap(pNew);
         v.swap(vNew);
     }
@@ -352,30 +357,10 @@ TransientResult TransientSolver::simulateWaterHammer(
     result.maxPressureTime = maxPressureTime;
     result.spatialNodes = spatialNodes;
     result.timeSteps = totalSteps;
-
-    double maxPressureMPa = maxPressure / 1.0e6;
-    double joukowskyEstimate = density * c * initialVelocity;
-    double joukowskyMPa = joukowskyEstimate / 1.0e6;
-
-    result.message = QStringLiteral(
-        "Water hammer simulation complete:\n"
-        "  Path: %1 blocks, L=%2 m, d=%3 mm, c=%4 m/s\n"
-        "  Initial velocity: %5 m/s, Closure time: %6 s\n"
-        "  Grid: N=%7, dt=%8 ms, steps=%9\n"
-        "  Max pressure: %10 MPa at t=%11 ms\n"
-        "  Joukowsky estimate: %12 MPa (Δp=ρcΔv)")
-        .arg(pathBlocks.size())
-        .arg(totalLength, 0, 'f', 2)
-        .arg(diameter * 1000.0, 0, 'f', 1)
-        .arg(c, 0, 'f', 1)
-        .arg(initialVelocity, 0, 'f', 2)
-        .arg(closureTime, 0, 'f', 3)
-        .arg(spatialNodes)
-        .arg(dt * 1000.0, 0, 'f', 3)
-        .arg(totalSteps)
-        .arg(maxPressureMPa, 0, 'f', 3)
-        .arg(maxPressureTime * 1000.0, 0, 'f', 1)
-        .arg(joukowskyMPa, 0, 'f', 3);
+    result.message = formatWaterHammerMessage(pp, static_cast<int>(pathBlocks.size()), totalLength,
+                                               closureTime, spatialNodes,
+                                               totalSteps, dt,
+                                               maxPressure, maxPressureTime);
 
     return result;
 }

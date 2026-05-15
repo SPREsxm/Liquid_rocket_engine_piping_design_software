@@ -8,6 +8,8 @@ add_library(lrep_utils STATIC
     NetworkValidator.cpp
     NetworkSolver.h
     NetworkSolver.cpp
+    ResultExporter.h
+    ResultExporter.cpp
     TransientSolver.h
     TransientSolver.cpp
     ResistanceCoefficients.h

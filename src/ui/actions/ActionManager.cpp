@@ -50,8 +50,12 @@ void ActionManager::createAll()
     toggleProp->setCheckable(true);
     auto* toggleMsg = add(ActionId::ToggleMessages, tr("&Messages"), QKeySequence(), tr("Show or hide message log"));
     toggleMsg->setCheckable(true);
+    auto* toggleGrid = add(ActionId::ToggleGrid, tr("&Grid"), QKeySequence(Qt::CTRL | Qt::Key_G), tr("Show or hide grid"));
+    toggleGrid->setCheckable(true);
+    toggleGrid->setChecked(true);
 
     // Tools
+    add(ActionId::RunAnalysis, tr("&Run Analysis"), QKeySequence(Qt::Key_F5), tr("Run piping network analysis"));
     add(ActionId::Validate,    tr("&Validate"),    QKeySequence(Qt::CTRL | Qt::Key_F7), tr("Validate the piping network"));
     add(ActionId::Preferences, tr("&Preferences..."), QKeySequence(), tr("Open preferences"));
 

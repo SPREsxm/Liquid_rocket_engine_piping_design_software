@@ -27,9 +27,10 @@ BlockScene::BlockScene(ComponentFactory* factory, QObject* parent)
 
 // ─── Block Management ──────────────────────────────────────
 
-BlockItem* BlockScene::addBlock(const ComponentDescriptor& descriptor, const QPointF& pos)
+BlockItem* BlockScene::addBlock(const ComponentDescriptor& descriptor, const QPointF& pos,
+                                const QUuid& forcedUuid)
 {
-    auto inst = ComponentInstance::create(descriptor, snapToGrid(pos));
+    auto inst = ComponentInstance::create(descriptor, snapToGrid(pos), forcedUuid);
     auto* block = new BlockItem(inst, descriptor);
     addItem(block);
     connectBlockSignals(block);

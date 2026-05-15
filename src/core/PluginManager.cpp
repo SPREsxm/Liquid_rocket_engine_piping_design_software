@@ -27,10 +27,9 @@ int PluginManager::discoverPlugins(const QString& pluginDir) {
 }
 
 IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
-    auto* lib = new QLibrary(dllPath);
+    auto lib = std::make_unique<QLibrary>(dllPath);
     if (!lib->load()) {
         qWarning() << "Failed to load plugin:" << dllPath << lib->errorString();
-        delete lib;
         return nullptr;
     }
 
@@ -39,7 +38,6 @@ IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
     if (!createFn) {
         qWarning() << "Plugin missing createPlugin symbol:" << dllPath;
         lib->unload();
-        delete lib;
         return nullptr;
     }
 
@@ -48,7 +46,6 @@ IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
     if (!destroyFn) {
         qWarning() << "Plugin missing destroyPlugin symbol:" << dllPath;
         lib->unload();
-        delete lib;
         return nullptr;
     }
 
@@ -57,12 +54,11 @@ IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
         qWarning() << "Plugin initialization failed:" << dllPath;
         if (plugin) destroyFn(plugin);
         lib->unload();
-        delete lib;
         return nullptr;
     }
 
     PluginEntry entry;
-    entry.library = lib;
+    entry.library = lib.release();  // transfer ownership
     entry.instance = plugin;
     entry.destroy = destroyFn;
 

@@ -115,3 +115,103 @@ TEST_CASE("SolverSettings overload for Auto", "[NetworkSolver]") {
     REQUIRE(sol.converged == true);
     delete scene;
 }
+
+// ─── Impedance-based flow distribution tests (Phase 17 A3) ────────
+
+namespace {
+    // Short pipe should have much lower resistance → higher flow
+    BlockScene* createAsymmetricTJunction() {
+        auto& factory = ComponentFactory::instance();
+        auto* scene = new BlockScene(&factory);
+
+        auto* tank  = scene->addBlock(ComponentDescriptor::createStorageTank(), QPointF(0, 0));
+        auto* tee   = scene->addBlock(ComponentDescriptor::createTee(), QPointF(150, 0));
+        auto* pipeS = scene->addBlock(ComponentDescriptor::createStraightPipe(), QPointF(300, -60));
+        auto* pipeL = scene->addBlock(ComponentDescriptor::createStraightPipe(), QPointF(300, 60));
+        auto* sinkS = scene->addBlock(ComponentDescriptor::createBufferTank(), QPointF(450, -60));
+        auto* sinkL = scene->addBlock(ComponentDescriptor::createBufferTank(), QPointF(450, 60));
+
+        // Set pipe lengths: short=0.1m, long=50m → K ratio ≈ 500
+        pipeS->setPropertyValue("length", 0.1);
+        pipeL->setPropertyValue("length", 50.0);
+        pipeS->setPropertyValue("diameter", 0.05);
+        pipeL->setPropertyValue("diameter", 0.05);
+
+        // Tank → Tee inlet
+        scene->addConnection(tank->outputPorts().first(), tee->inputPorts().first());
+        // Tee Outlet A → short pipe → sinkS
+        scene->addConnection(tee->outputPorts()[0], pipeS->inputPorts().first());
+        scene->addConnection(pipeS->outputPorts().first(), sinkS->inputPorts().first());
+        // Tee Outlet B → long pipe → sinkL
+        scene->addConnection(tee->outputPorts()[1], pipeL->inputPorts().first());
+        scene->addConnection(pipeL->outputPorts().first(), sinkL->inputPorts().first());
+
+        return scene;
+    }
+}
+
+TEST_CASE("Asymmetric T-junction: short pipe gets more flow than long pipe", "[NetworkSolver]") {
+    auto* scene = createAsymmetricTJunction();
+    auto sol = solveNetwork(scene, 1e6, 5.0);
+    REQUIRE(sol.converged == true);
+
+    // Find flow rates through each downstream pipe → sink edge
+    double flowShort = -1.0, flowLong = -1.0;
+    for (const auto& e : sol.edges) {
+        auto* sb = scene->blockByUuid(e.sourceUuid);
+        if (sb && sb->typeId() == "pipe.straight") {
+            double len = sb->propertyValue("length").toDouble();
+            if (len < 1.0)
+                flowShort = e.massFlowRate;
+            else
+                flowLong = e.massFlowRate;
+        }
+    }
+    REQUIRE(flowShort > 0.0);
+    REQUIRE(flowLong > 0.0);
+    // Short pipe (0.1m) must carry more flow than long pipe (50m)
+    REQUIRE(flowShort > 2.0 * flowLong);
+
+    delete scene;
+}
+
+TEST_CASE("Asymmetric T-junction: total flow is conserved", "[NetworkSolver]") {
+    auto* scene = createAsymmetricTJunction();
+    auto sol = solveNetwork(scene, 1e6, 10.0);
+    REQUIRE(sol.converged == true);
+
+    double totalOut = 0.0;
+    for (const auto& node : sol.nodes) {
+        auto* b = scene->blockByUuid(node.blockUuid);
+        if (b && b->typeId() == "tank.buffer")
+            totalOut += node.inletFlow;
+    }
+    // Total flow into sinks ≈ inlet flow (within 1%)
+    REQUIRE(std::abs(totalOut - 10.0) < 0.1);
+
+    delete scene;
+}
+
+TEST_CASE("Asymmetric T-junction: pressure drop in long pipe > short pipe", "[NetworkSolver]") {
+    auto* scene = createAsymmetricTJunction();
+    auto sol = solveNetwork(scene, 1e6, 5.0);
+    REQUIRE(sol.converged == true);
+
+    // Collect edges with pressure drop
+    double dpShort = 0.0, dpLong = 0.0;
+    for (const auto& e : sol.edges) {
+        for (auto* b : scene->allBlocks()) {
+            if (b->typeId() == "pipe.straight" && e.sourceUuid == b->uuid()) {
+                double len = b->propertyValue("length").toDouble();
+                if (len < 1.0)
+                    dpShort = e.pressureDrop;
+                else
+                    dpLong = e.pressureDrop;
+            }
+        }
+    }
+    // Long pipe should have higher total pressure drop
+    REQUIRE(dpLong > dpShort);
+
+    delete scene;
+}

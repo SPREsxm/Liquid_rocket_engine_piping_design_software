@@ -1,6 +1,7 @@
 #include "BlockItem.h"
 #include "PortItem.h"
 #include "ConnectionItem.h"
+#include "BlockView.h"
 
 #include <QCursor>
 #include <QFont>
@@ -269,24 +270,16 @@ void BlockItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* event)
     if (chosen == renameAction) {
         mouseDoubleClickEvent(nullptr);
     } else if (chosen == copyAction) {
-        // Block is selected; Ctrl+C / Ctrl+V work through the view
+        auto views = scene()->views();
+        if (!views.isEmpty()) {
+            if (auto* bv = qobject_cast<BlockView*>(views.first()))
+                bv->copySelected();
+        }
     } else if (chosen == deleteAction) {
-        prepareGeometryChange();
-        if (auto* bs = qobject_cast<QGraphicsScene*>(scene())) {
-            // Remove connections attached to this block first
-            for (auto* conn : bs->items()) {
-                if (auto* ci = qgraphicsitem_cast<ConnectionItem*>(conn)) {
-                    if (ci->sourcePort() && ci->sourcePort()->parentBlock() == this) {
-                        bs->removeItem(ci);
-                        delete ci;
-                    } else if (ci->destPort() && ci->destPort()->parentBlock() == this) {
-                        bs->removeItem(ci);
-                        delete ci;
-                    }
-                }
-            }
-            bs->removeItem(this);
-            delete this;
+        auto views = scene()->views();
+        if (!views.isEmpty()) {
+            if (auto* bv = qobject_cast<BlockView*>(views.first()))
+                bv->deleteSelected();
         }
     }
 }

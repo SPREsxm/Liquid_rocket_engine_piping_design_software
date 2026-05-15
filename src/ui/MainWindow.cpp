@@ -9,6 +9,7 @@
 #include "ui/library/LibraryTreeView.h"
 #include "ui/properties/PropertyEditor.h"
 #include "PreferencesDialog.h"
+#include "SolverResultsPanel.h"
 #include "utils/NetworkValidator.h"
 #include "utils/NetworkSolver.h"
 #include "utils/TransientSolver.h"
@@ -188,6 +189,12 @@ void MainWindow::createActions()
         toggleMessages->setChecked(true);
     }
 
+    auto* toggleGrid = am.action(ActionId::ToggleGrid);
+    if (toggleGrid) {
+        connect(toggleGrid, &QAction::toggled, m_blockView, &BlockView::setGridVisible);
+        toggleGrid->setChecked(true);
+    }
+
     // Edit — Undo/Redo connected to QUndoStack
     QAction* undoAction = am.action(ActionId::Undo);
     QAction* redoAction = am.action(ActionId::Redo);
@@ -208,6 +215,7 @@ void MainWindow::createActions()
     connect(am.action(ActionId::Delete), &QAction::triggered, m_blockView, &BlockView::deleteSelected);
 
     // Tools
+    connect(am.action(ActionId::RunAnalysis), &QAction::triggered, this, &MainWindow::onRunAnalysis);
     connect(am.action(ActionId::Validate), &QAction::triggered, this, &MainWindow::onValidate);
     connect(am.action(ActionId::Preferences), &QAction::triggered, this, &MainWindow::onPreferences);
 
@@ -229,6 +237,9 @@ void MainWindow::createMenus()
     m_fileMenu->addAction(am.action(ActionId::SaveAs));
     m_fileMenu->addSeparator();
     m_fileMenu->addAction(am.action(ActionId::Export_));
+    m_fileMenu->addSeparator();
+    m_recentFilesMenu = m_fileMenu->addMenu(tr("&Recent Files"));
+    updateRecentFilesMenu();
     m_fileMenu->addSeparator();
     {
         auto* exitAction = new QAction(tr("E&xit"), this);
@@ -254,9 +265,13 @@ void MainWindow::createMenus()
     m_viewMenu->addAction(am.action(ActionId::ToggleLibrary));
     m_viewMenu->addAction(am.action(ActionId::ToggleProperties));
     m_viewMenu->addAction(am.action(ActionId::ToggleMessages));
+    m_viewMenu->addSeparator();
+    m_viewMenu->addAction(am.action(ActionId::ToggleGrid));
 
     m_toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    m_toolsMenu->addAction(am.action(ActionId::RunAnalysis));
     m_toolsMenu->addAction(am.action(ActionId::Validate));
+    m_toolsMenu->addSeparator();
     m_toolsMenu->addAction(am.action(ActionId::Preferences));
 
     m_helpMenu = menuBar()->addMenu(tr("&Help"));
@@ -281,6 +296,8 @@ void MainWindow::createToolBar()
     m_mainToolBar->addAction(am.action(ActionId::Undo));
     m_mainToolBar->addAction(am.action(ActionId::Redo));
     m_mainToolBar->addSeparator();
+    m_mainToolBar->addAction(am.action(ActionId::RunAnalysis));
+    m_mainToolBar->addSeparator();
     m_mainToolBar->addAction(am.action(ActionId::ZoomIn));
     m_mainToolBar->addAction(am.action(ActionId::ZoomOut));
 }
@@ -291,6 +308,13 @@ void MainWindow::createStatusBar()
 {
     m_statusLabel = new QLabel(tr("Ready"));
     statusBar()->addWidget(m_statusLabel, 1);
+
+    m_zoomLabel = new QLabel(tr("100%"));
+    statusBar()->addPermanentWidget(m_zoomLabel);
+
+    connect(m_blockView, &BlockView::zoomChanged, this, [this](double factor) {
+        m_zoomLabel->setText(QStringLiteral("%1%").arg(qRound(factor * 100)));
+    });
 }
 
 // ─── Dock Widgets ───────────────────────────────────────────
@@ -328,6 +352,13 @@ void MainWindow::createDockWidgets()
     m_messageLog->setFont(QFont("Consolas", 9));
     m_messageDock->setWidget(m_messageLog);
     addDockWidget(Qt::BottomDockWidgetArea, m_messageDock);
+
+    // Solver results (bottom, tabbed with messages)
+    m_resultsDock = new SolverResultsPanel(this);
+    m_resultsDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
+    addDockWidget(Qt::BottomDockWidgetArea, m_resultsDock);
+    tabifyDockWidget(m_messageDock, m_resultsDock);
+    m_messageDock->raise(); // show messages by default
 }
 
 // ─── Central Widget ─────────────────────────────────────────
@@ -379,6 +410,7 @@ void MainWindow::onOpen()
         setDirty(false);
         m_statusLabel->setText(tr("Opened: %1").arg(path));
         appendMessage("Opened: " + path);
+        addToRecentFiles(path);
     } else {
         QMessageBox::warning(this, tr("Error"), tr("Invalid project file format."));
     }
@@ -404,6 +436,7 @@ void MainWindow::onSave()
     setDirty(false);
     m_statusLabel->setText(tr("Saved: %1").arg(m_currentFilePath));
     appendMessage("Saved: " + m_currentFilePath);
+    addToRecentFiles(m_currentFilePath);
 }
 
 void MainWindow::onSaveAs()
@@ -464,6 +497,76 @@ void MainWindow::onExport()
 }
 
 // ─── Tools ──────────────────────────────────────────────────
+
+void MainWindow::onRunAnalysis()
+{
+    // Quick topology check — stop on errors
+    auto topo = validateTopology(m_blockScene);
+    if (topo.hasErrors()) {
+        QMessageBox::warning(this, tr("Analysis"),
+            tr("Topology errors detected. Fix them first.\n\n%1")
+                .arg(topo.issues.first().message));
+        return;
+    }
+
+    // Load solver settings
+    QSettings settings;
+    SolverSettings solverSettings;
+    solverSettings.tolerance = settings.value("Solver/Tolerance", 1e-6).toDouble();
+    solverSettings.maxIterations = settings.value("Solver/MaxIter", 200).toInt();
+    solverSettings.relaxationFactor = settings.value("Solver/Relaxation", 1.0).toDouble();
+    solverSettings.targetCourant = settings.value("Solver/Courant", 0.9).toDouble();
+    solverSettings.timeStepSeconds = settings.value("Solver/TimeStep", -1.0).toDouble();
+    solverSettings.gridBaseNodes = settings.value("Solver/GridNodes", 50).toInt();
+
+    NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings);
+    appendMessage(sol.message);
+
+    // Display results in panel
+    m_resultsDock->setResults(sol);
+    m_resultsDock->raise();
+
+    if (!sol.converged) {
+        m_statusLabel->setText(tr("Analysis did not converge"));
+        return;
+    }
+
+    // Flow visualization
+    QHash<QUuid, BlockItem*> blockMap;
+    for (auto* b : m_blockScene->allBlocks())
+        blockMap[b->uuid()] = b;
+
+    double maxFlow = 0.0;
+    for (const auto& edge : sol.edges)
+        maxFlow = std::max(maxFlow, std::abs(edge.massFlowRate));
+
+    for (auto* conn : m_blockScene->allConnections()) {
+        auto* sp = conn->sourcePort();
+        auto* dp = conn->destPort();
+        if (!sp || !dp) continue;
+        auto* sb = sp->parentBlock();
+        auto* db = dp->parentBlock();
+        if (!sb || !db) continue;
+
+        for (const auto& edge : sol.edges) {
+            if (edge.sourceUuid == sb->uuid() &&
+                edge.destUuid == db->uuid()) {
+                conn->setFlowData(std::abs(edge.massFlowRate), maxFlow);
+                break;
+            }
+        }
+    }
+
+    for (const auto& node : sol.nodes) {
+        auto* b = blockMap.value(node.blockUuid);
+        if (b) b->setPressure(node.pressure);
+    }
+
+    m_blockScene->update();
+    m_statusLabel->setText(tr("Analysis complete — %1 nodes, %2 edges, ΔP=%3 Pa")
+        .arg(sol.nodes.size()).arg(sol.edges.size())
+        .arg(sol.totalPressureDrop, 0, 'f', 1));
+}
 
 void MainWindow::onValidate()
 {
@@ -592,6 +695,60 @@ void MainWindow::onAbout()
         .arg(QString::fromLatin1(qVersion())));
 }
 
+// ─── Recent Files ────────────────────────────────────────────
+
+void MainWindow::addToRecentFiles(const QString& filePath)
+{
+    QSettings settings;
+    QStringList recent = settings.value("RecentFiles/files").toStringList();
+    recent.removeAll(filePath);
+    recent.prepend(filePath);
+    while (recent.size() > 10)
+        recent.removeLast();
+    settings.setValue("RecentFiles/files", recent);
+    updateRecentFilesMenu();
+}
+
+void MainWindow::updateRecentFilesMenu()
+{
+    if (!m_recentFilesMenu) return;
+    m_recentFilesMenu->clear();
+
+    QSettings settings;
+    const QStringList recent = settings.value("RecentFiles/files").toStringList();
+    for (const QString& path : recent) {
+        auto* action = m_recentFilesMenu->addAction(path);
+        connect(action, &QAction::triggered, this, &MainWindow::openRecentFile);
+    }
+    m_recentFilesMenu->setEnabled(!recent.isEmpty());
+}
+
+void MainWindow::openRecentFile()
+{
+    auto* action = qobject_cast<QAction*>(sender());
+    if (!action) return;
+    const QString path = action->text();
+
+    if (!maybeSave()) return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, tr("Error"), tr("Cannot open file: %1").arg(file.errorString()));
+        return;
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    file.close();
+
+    if (doc.isObject()) {
+        m_blockScene->fromJson(doc.object());
+        m_currentFilePath = path;
+        setDirty(false);
+        m_statusLabel->setText(tr("Opened: %1").arg(path));
+        appendMessage("Opened: " + path);
+        addToRecentFiles(path);
+    }
+}
+
 // ─── Settings Persistence ───────────────────────────────────
 
 void MainWindow::saveSettings()
@@ -612,6 +769,18 @@ void MainWindow::restoreSettings()
     const QByteArray state = settings.value("windowState").toByteArray();
     if (!state.isEmpty()) restoreState(state);
     settings.endGroup();
+
+    // Ensure docks are always shown on startup (user may have closed them last session)
+    if (m_libraryDock && m_libraryDock->isHidden()) m_libraryDock->setVisible(true);
+    if (m_propertyDock && m_propertyDock->isHidden()) m_propertyDock->setVisible(true);
+    if (m_messageDock && m_messageDock->isHidden()) m_messageDock->setVisible(true);
+
+    // Sync View menu toggle state with actual dock visibility
+    if (m_actionManager) {
+        if (auto* a = m_actionManager->action(ActionId::ToggleLibrary)) a->setChecked(m_libraryDock && m_libraryDock->isVisible());
+        if (auto* a = m_actionManager->action(ActionId::ToggleProperties)) a->setChecked(m_propertyDock && m_propertyDock->isVisible());
+        if (auto* a = m_actionManager->action(ActionId::ToggleMessages)) a->setChecked(m_messageDock && m_messageDock->isVisible());
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────

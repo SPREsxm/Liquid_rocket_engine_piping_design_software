@@ -20,7 +20,8 @@ public:
     ComponentFactory* factory() const { return m_factory; }
 
     // Block management
-    BlockItem* addBlock(const ComponentDescriptor& descriptor, const QPointF& pos);
+    BlockItem* addBlock(const ComponentDescriptor& descriptor, const QPointF& pos,
+                        const QUuid& forcedUuid = {});
     void removeBlock(BlockItem* block);
     QList<BlockItem*> allBlocks() const;
     BlockItem* blockByUuid(const QUuid& uuid) const;
