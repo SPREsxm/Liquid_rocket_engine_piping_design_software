@@ -33,6 +33,8 @@ add_executable(lrep_tests
     test_ReportGenerator.cpp
     test_DesignRules.cpp
     test_BomGenerator.cpp
+    test_SensitivitySolver.cpp
+    test_PathProfile.cpp
 )
 
 target_include_directories(lrep_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")

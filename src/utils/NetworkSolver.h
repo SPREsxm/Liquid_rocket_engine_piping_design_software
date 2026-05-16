@@ -93,3 +93,24 @@ NetworkSolution solveNetworkAuto(BlockScene* scene,
                                  const SolverSettings& settings,
                                  double inletPressurePa = 1.0e6,
                                  double inletMassFlowKgPerS = 10.0);
+
+// ── Path Profile ────────────────────────────────────────────────────
+
+struct PathProfilePoint {
+    double cumulativeDistance;  // m
+    double pressure;            // Pa
+    QString nodeLabel;
+};
+
+struct PathProfile {
+    QVector<PathProfilePoint> points;
+    double totalLength;
+};
+
+// Compute pressure vs cumulative distance along the flow path from
+// startBlockUuid to endBlockUuid.  Returns an empty profile when no
+// directed path exists between the two nodes.
+PathProfile computePathProfile(BlockScene* scene,
+                               const NetworkSolution& solution,
+                               const QUuid& startBlockUuid,
+                               const QUuid& endBlockUuid);

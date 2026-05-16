@@ -31,6 +31,8 @@ add_library(lrep_utils STATIC
     DesignRules.cpp
     BomGenerator.h
     BomGenerator.cpp
+    SensitivitySolver.h
+    SensitivitySolver.cpp
 )
 
 target_include_directories(lrep_utils PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

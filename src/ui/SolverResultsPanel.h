@@ -12,7 +12,16 @@
 #include "utils/NetworkSolver.h"
 #include "utils/DesignRules.h"
 #include "utils/BomGenerator.h"
+#include "utils/SensitivitySolver.h"
+#include "utils/TransientSolver.h"
 
+#include <QTimer>
+
+class QComboBox;
+class QSpinBox;
+class QDoubleSpinBox;
+class QSlider;
+class BlockScene;
 class PaintChartWidget;
 
 class SolverResultsPanel : public QDockWidget {
@@ -28,9 +37,30 @@ public:
 
     const NetworkSolution& lastSolution() const { return m_lastSolution; }
 
+    // Sensitivity
+    void setAnalysisContext(class BlockScene* scene,
+                            const SolverSettings& settings,
+                            double inletPressurePa,
+                            double inletMassFlowKgPerS);
+    void setSensitivityResults(const SensitivityResult& result);
+    void setTornadoResults(const QVector<SensitivityResult::TornadoBar>& bars,
+                           const QString& outputMetric);
+
+    // Path profile
+    struct PathProfilePoint {
+        double cumulativeDistance;
+        double pressure;
+        QString nodeLabel;
+    };
+    void setPathProfile(const QVector<PathProfilePoint>& profile);
+
 private slots:
     void onExportCsv();
     void onExportReport();
+    void onRunSweep();
+    void onComputeTornado();
+    void onTransientPlayPause();
+    void onTransientFrame();
 
 signals:
     void exportCsvRequested();
@@ -66,4 +96,33 @@ private:
     NetworkSolution m_lastSolution;
     BomResult m_bomResult;
     bool m_hasBom = false;
+
+    // Sensitivity analysis tab
+    QWidget* m_sensitivityTab = nullptr;
+    QComboBox* m_sweepParamCombo = nullptr;
+    QDoubleSpinBox* m_sweepMinSpin = nullptr;
+    QDoubleSpinBox* m_sweepMaxSpin = nullptr;
+    QSpinBox* m_sweepStepsSpin = nullptr;
+    QPushButton* m_runSweepBtn = nullptr;
+    QComboBox* m_tornadoOutputCombo = nullptr;
+    QPushButton* m_computeTornadoBtn = nullptr;
+    PaintChartWidget* m_sensitivityChart = nullptr;
+    BlockScene* m_sensitivityScene = nullptr;
+    SolverSettings m_sensitivitySettings;
+    double m_sensitivityInletPressure = 1.0e6;
+    double m_sensitivityInletFlow = 10.0;
+
+    // Path profile tab
+    QWidget* m_pathProfileTab = nullptr;
+    PaintChartWidget* m_pathProfileChart = nullptr;
+    QTableWidget* m_pathProfileTable = nullptr;
+
+    // Transient animation
+    std::vector<TransientState> m_transientHistory;
+    int m_transientFrame = 0;
+    QTimer* m_transientTimer = nullptr;
+    QSlider* m_transientProgress = nullptr;
+    QPushButton* m_transientPlayBtn = nullptr;
+    PaintChartWidget* m_transientAnimChart = nullptr;
+    bool m_transientPlaying = false;
 };

@@ -22,6 +22,16 @@ void PaintChartWidget::setMultiSeries(const QVector<QVector<QPointF>>& series,
     update();
 }
 
+void PaintChartWidget::setTornadoData(const QStringList& labels,
+                                      const QVector<double>& negImpacts,
+                                      const QVector<double>& posImpacts)
+{
+    m_tornadoLabels = labels;
+    m_tornadoNegImpacts = negImpacts;
+    m_tornadoPosImpacts = posImpacts;
+    update();
+}
+
 void PaintChartWidget::setXLabel(const QString& label) { m_xLabel = label; update(); }
 void PaintChartWidget::setYLabel(const QString& label) { m_yLabel = label; update(); }
 void PaintChartWidget::setTitle(const QString& title)  { m_title = title; update(); }
@@ -38,7 +48,20 @@ void PaintChartWidget::paintEvent(QPaintEvent*)
     // Determine data ranges
     double xMin = 0, xMax = 1, yMin = 0, yMax = 1;
 
-    if (m_chartType == BarChart && !m_data.isEmpty()) {
+    if (m_chartType == TornadoChart && !m_tornadoNegImpacts.isEmpty()) {
+        // Tornado uses its own painting path — no axes needed
+        drawTornadoChart(p, plotArea);
+        if (!m_title.isEmpty()) {
+            p.setPen(Qt::black);
+            QFont titleFont = font();
+            titleFont.setBold(true);
+            titleFont.setPointSize(titleFont.pointSize() + 1);
+            p.setFont(titleFont);
+            p.drawText(QRect(rect().left(), 2, rect().width(), kTopMargin - 2),
+                       Qt::AlignHCenter | Qt::AlignVCenter, m_title);
+        }
+        return;
+    } else if (m_chartType == BarChart && !m_data.isEmpty()) {
         xMin = 0.0;
         xMax = static_cast<double>(m_data.size());
         yMax = 0.0;
@@ -297,5 +320,74 @@ void PaintChartWidget::drawLineChart(QPainter& p, const QRect& plotArea,
             p.drawText(legendX + 16, legendY + s * 16, 100, 10,
                        Qt::AlignLeft | Qt::AlignVCenter, m_seriesLabels[s]);
         }
+    }
+}
+
+void PaintChartWidget::drawTornadoChart(QPainter& p, const QRect& plotArea)
+{
+    int n = qMin(m_tornadoLabels.size(),
+                 qMin(m_tornadoNegImpacts.size(), m_tornadoPosImpacts.size()));
+    if (n == 0) return;
+
+    // Find max absolute impact for scaling
+    double maxImpact = 1.0;
+    for (int i = 0; i < n; ++i) {
+        double a = qMax(qAbs(m_tornadoNegImpacts[i]), qAbs(m_tornadoPosImpacts[i]));
+        if (a > maxImpact) maxImpact = a;
+    }
+    maxImpact *= 1.15; // 15% margin
+
+    const int barHeight = qMin(22, (plotArea.height() - 8) / n);
+    const int gap = 4;
+    const double centerX = plotArea.center().x();
+    const double scaleX = (plotArea.width() * 0.5 - 40) / maxImpact;
+
+    QFont barFont = font();
+    barFont.setPointSize(qMax(barFont.pointSize() - 2, 7));
+    p.setFont(barFont);
+
+    for (int i = 0; i < n; ++i) {
+        int y = plotArea.top() + i * (barHeight + gap);
+
+        double neg = m_tornadoNegImpacts[i];
+        double pos = m_tornadoPosImpacts[i];
+
+        // Negative bar (left of center)
+        {
+            int barW = static_cast<int>(qAbs(neg) * scaleX);
+            QColor color = neg < 0 ? QColor(21, 101, 192) : QColor(198, 40, 40);
+            p.setPen(Qt::NoPen);
+            p.setBrush(color);
+            p.drawRoundedRect(static_cast<int>(centerX) - barW, y, barW, barHeight, 2, 2);
+        }
+
+        // Positive bar (right of center)
+        {
+            int barW = static_cast<int>(qAbs(pos) * scaleX);
+            QColor color = pos > 0 ? QColor(198, 40, 40) : QColor(21, 101, 192);
+            p.setPen(Qt::NoPen);
+            p.setBrush(color);
+            p.drawRoundedRect(static_cast<int>(centerX), y, barW, barHeight, 2, 2);
+        }
+
+        // Center line
+        p.setPen(QPen(QColor(80, 80, 80), 1, Qt::DashLine));
+        p.drawLine(QPointF(centerX, plotArea.top()),
+                   QPointF(centerX, plotArea.bottom()));
+
+        // Value labels
+        p.setPen(QColor(60, 60, 60));
+        QString negLabel = QString::number(neg, 'g', 3);
+        QString posLabel = QString::number(pos, 'g', 3);
+        p.drawText(QRect(static_cast<int>(centerX) + 4, y, 80, barHeight),
+                   Qt::AlignLeft | Qt::AlignVCenter, posLabel);
+        p.drawText(QRect(static_cast<int>(centerX) - 84, y, 80, barHeight),
+                   Qt::AlignRight | Qt::AlignVCenter, negLabel);
+
+        // Parameter name (left margin)
+        p.setPen(QColor(40, 40, 40));
+        QString name = m_tornadoLabels.value(i);
+        p.drawText(QRect(plotArea.left(), y, 80, barHeight),
+                   Qt::AlignLeft | Qt::AlignVCenter, name);
     }
 }

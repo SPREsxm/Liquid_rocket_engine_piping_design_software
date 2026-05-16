@@ -4,12 +4,22 @@
 #include "utils/TransientSolver.h"
 #include "utils/ResultExporter.h"
 #include "utils/ReportGenerator.h"
+#include "utils/SensitivitySolver.h"
 
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLabel>
 #include <QMessageBox>
-#include <QVBoxLayout>
+#include <QPushButton>
+#include <QSlider>
+#include <QSpinBox>
 #include <QSplitter>
+#include <QVBoxLayout>
 
 SolverResultsPanel::SolverResultsPanel(QWidget* parent)
     : QDockWidget(tr("Solver Results"), parent)
@@ -110,6 +120,133 @@ void SolverResultsPanel::setupUi()
     m_designCheckTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tabWidget->addTab(m_designCheckTable, tr("Design Checks"));
 
+    // ── Sensitivity Analysis tab ───────────────────────
+    m_sensitivityTab = new QWidget;
+    auto* sensLayout = new QVBoxLayout(m_sensitivityTab);
+
+    // Controls row
+    auto* sensControls = new QHBoxLayout;
+    sensControls->addWidget(new QLabel(tr("Parameter:")));
+    m_sweepParamCombo = new QComboBox;
+    m_sweepParamCombo->addItems({
+        tr("Inlet Pressure"), tr("Inlet Mass Flow"),
+        tr("Fluid Density"), tr("Fluid Viscosity"),
+        tr("Pipe Roughness"), tr("Pipe Wall Thickness")
+    });
+    m_sweepParamCombo->setCurrentIndex(0);
+    sensControls->addWidget(m_sweepParamCombo);
+
+    sensControls->addWidget(new QLabel(tr("Min:")));
+    m_sweepMinSpin = new QDoubleSpinBox;
+    m_sweepMinSpin->setRange(0.0, 1e12);
+    m_sweepMinSpin->setDecimals(2);
+    m_sweepMinSpin->setValue(0.5e6);
+    sensControls->addWidget(m_sweepMinSpin);
+
+    sensControls->addWidget(new QLabel(tr("Max:")));
+    m_sweepMaxSpin = new QDoubleSpinBox;
+    m_sweepMaxSpin->setRange(0.0, 1e12);
+    m_sweepMaxSpin->setDecimals(2);
+    m_sweepMaxSpin->setValue(5.0e6);
+    sensControls->addWidget(m_sweepMaxSpin);
+
+    sensControls->addWidget(new QLabel(tr("Steps:")));
+    m_sweepStepsSpin = new QSpinBox;
+    m_sweepStepsSpin->setRange(3, 50);
+    m_sweepStepsSpin->setValue(10);
+    sensControls->addWidget(m_sweepStepsSpin);
+
+    m_runSweepBtn = new QPushButton(tr("Run Sweep"));
+    m_runSweepBtn->setEnabled(false);
+    connect(m_runSweepBtn, &QPushButton::clicked, this, &SolverResultsPanel::onRunSweep);
+    sensControls->addWidget(m_runSweepBtn);
+    sensControls->addStretch();
+    sensLayout->addLayout(sensControls);
+
+    // Tornado controls
+    auto* tornadoControls = new QHBoxLayout;
+    tornadoControls->addWidget(new QLabel(tr("Output Metric:")));
+    m_tornadoOutputCombo = new QComboBox;
+    m_tornadoOutputCombo->addItems({
+        tr("Total Pressure Drop"), tr("Thrust"),
+        tr("Specific Impulse"), tr("Max Pressure")
+    });
+    tornadoControls->addWidget(m_tornadoOutputCombo);
+
+    m_computeTornadoBtn = new QPushButton(tr("Compute Tornado"));
+    m_computeTornadoBtn->setEnabled(false);
+    connect(m_computeTornadoBtn, &QPushButton::clicked, this, &SolverResultsPanel::onComputeTornado);
+    tornadoControls->addWidget(m_computeTornadoBtn);
+    tornadoControls->addStretch();
+    sensLayout->addLayout(tornadoControls);
+
+    // Chart area
+    m_sensitivityChart = new PaintChartWidget;
+    m_sensitivityChart->setChartType(PaintChartWidget::LineChart);
+    m_sensitivityChart->setXLabel(tr("Parameter Value"));
+    m_sensitivityChart->setYLabel(tr("Output"));
+    m_sensitivityChart->setTitle(tr("Parameter Sweep"));
+    sensLayout->addWidget(m_sensitivityChart, 1);
+
+    m_tabWidget->addTab(m_sensitivityTab, tr("Sensitivity"));
+
+    // ── Path Profile tab ─────────────────────────────────
+    m_pathProfileTab = new QWidget;
+    auto* ppLayout = new QVBoxLayout(m_pathProfileTab);
+
+    m_pathProfileChart = new PaintChartWidget;
+    m_pathProfileChart->setChartType(PaintChartWidget::LineChart);
+    m_pathProfileChart->setXLabel(tr("Cumulative Distance (m)"));
+    m_pathProfileChart->setYLabel(tr("Pressure (Pa)"));
+    m_pathProfileChart->setTitle(tr("Path Pressure Profile"));
+    ppLayout->addWidget(m_pathProfileChart, 1);
+
+    m_pathProfileTable = new QTableWidget(0, 3);
+    m_pathProfileTable->setHorizontalHeaderLabels({
+        tr("Node"), tr("Distance (m)"), tr("Pressure (Pa)")
+    });
+    m_pathProfileTable->horizontalHeader()->setStretchLastSection(true);
+    m_pathProfileTable->setAlternatingRowColors(true);
+    m_pathProfileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ppLayout->addWidget(m_pathProfileTable);
+
+    m_tabWidget->addTab(m_pathProfileTab, tr("Path Profile"));
+
+    // ── Transient animation (embedded in Transient tab) ──
+    {
+        auto* animWidget = new QWidget;
+        auto* animLayout = new QVBoxLayout(animWidget);
+
+        m_transientAnimChart = new PaintChartWidget;
+        m_transientAnimChart->setChartType(PaintChartWidget::LineChart);
+        m_transientAnimChart->setXLabel(tr("Node Index"));
+        m_transientAnimChart->setYLabel(tr("Pressure (Pa)"));
+        m_transientAnimChart->setTitle(tr("Water Hammer — Frame Replay"));
+        animLayout->addWidget(m_transientAnimChart, 1);
+
+        auto* animCtrls = new QHBoxLayout;
+        m_transientPlayBtn = new QPushButton(tr("▶ Play"));
+        m_transientPlayBtn->setEnabled(false);
+        connect(m_transientPlayBtn, &QPushButton::clicked,
+                this, &SolverResultsPanel::onTransientPlayPause);
+        animCtrls->addWidget(m_transientPlayBtn);
+
+        m_transientProgress = new QSlider(Qt::Horizontal);
+        m_transientProgress->setEnabled(false);
+        m_transientProgress->setTickPosition(QSlider::TicksBelow);
+        connect(m_transientProgress, &QSlider::valueChanged, this, [this](int frame) {
+            m_transientFrame = frame;
+            onTransientFrame();
+        });
+        animCtrls->addWidget(m_transientProgress, 1);
+
+        animLayout->addLayout(animCtrls);
+        m_tabWidget->addTab(animWidget, tr("Transient Animation"));
+    }
+
+    // Timer for animation
+    m_transientTimer = new QTimer(this);
+
     layout->addWidget(m_tabWidget);
 
     // ── Export button ─────────────────────────────
@@ -183,6 +320,8 @@ void SolverResultsPanel::setResults(const NetworkSolution& solution)
     m_lastSolution = solution;
     m_exportBtn->setEnabled(true);
     m_exportReportBtn->setEnabled(true);
+    m_runSweepBtn->setEnabled(m_sensitivityScene != nullptr);
+    m_computeTornadoBtn->setEnabled(m_sensitivityScene != nullptr);
 }
 
 void SolverResultsPanel::populateThrustTab(const NetworkSolution& solution)
@@ -212,9 +351,10 @@ void SolverResultsPanel::populateThrustTab(const NetworkSolution& solution)
 
 void SolverResultsPanel::setTransientResults(const TransientResult& result)
 {
+    // Original summary text
     m_transientSummary->append(result.message);
 
-    // Populate transient pressure history chart
+    // Populate transient pressure history chart (original code)
     QVector<QVector<QPointF>> multiSeries;
     QStringList labels;
     if (!result.history.empty()) {
@@ -229,6 +369,23 @@ void SolverResultsPanel::setTransientResults(const TransientResult& result)
         labels.append(QStringLiteral("Max Pressure"));
     }
     m_transientChart->setMultiSeries(multiSeries, labels);
+
+    // Store history for animation replay
+    m_transientHistory = result.history;
+    m_transientFrame = 0;
+    m_transientTimer->stop();
+    m_transientPlaying = false;
+
+    if (!result.history.empty()) {
+        m_transientProgress->setEnabled(true);
+        m_transientProgress->setMaximum(static_cast<int>(result.history.size()) - 1);
+        m_transientProgress->setValue(0);
+        m_transientPlayBtn->setEnabled(true);
+        m_transientPlayBtn->setText(tr("▶ Play"));
+
+        // Show first frame
+        onTransientFrame();
+    }
 }
 
 void SolverResultsPanel::onExportCsv()
@@ -336,4 +493,215 @@ void SolverResultsPanel::clearResults()
     m_bomResult = BomResult{};
     m_exportBtn->setEnabled(false);
     m_exportReportBtn->setEnabled(false);
+    m_runSweepBtn->setEnabled(false);
+    m_computeTornadoBtn->setEnabled(false);
+    m_sensitivityScene = nullptr;
+    m_transientHistory.clear();
+    m_transientFrame = 0;
+    m_transientTimer->stop();
+    m_transientPlaying = false;
+    m_transientPlayBtn->setEnabled(false);
+    m_transientProgress->setEnabled(false);
+    m_transientProgress->setMaximum(0);
+}
+
+// ── Sensitivity Analysis ──────────────────────────────────────────
+
+void SolverResultsPanel::setAnalysisContext(BlockScene* scene,
+                                            const SolverSettings& settings,
+                                            double inletPressurePa,
+                                            double inletMassFlowKgPerS)
+{
+    m_sensitivityScene = scene;
+    m_sensitivitySettings = settings;
+    m_sensitivityInletPressure = inletPressurePa;
+    m_sensitivityInletFlow = inletMassFlowKgPerS;
+    m_runSweepBtn->setEnabled(scene != nullptr);
+    m_computeTornadoBtn->setEnabled(scene != nullptr);
+}
+
+void SolverResultsPanel::onRunSweep()
+{
+    if (!m_sensitivityScene) return;
+
+    // Map combo index to param key
+    static const QStringList keys = {
+        "inletPressurePa", "inletMassFlow",
+        "fluidDensity", "fluidViscosity",
+        "pipeRoughness", "pipeWallThickness"
+    };
+    QString key = keys.value(m_sweepParamCombo->currentIndex(), "inletPressurePa");
+
+    SensitivityResult result = runParameterSweep(
+        m_sensitivityScene, m_sensitivitySettings, key,
+        m_sweepMinSpin->value(), m_sweepMaxSpin->value(),
+        m_sweepStepsSpin->value(),
+        m_sensitivityInletPressure, m_sensitivityInletFlow);
+
+    setSensitivityResults(result);
+}
+
+void SolverResultsPanel::setSensitivityResults(const SensitivityResult& result)
+{
+    if (result.points.isEmpty()) return;
+
+    auto dpSeries = result.totalPressureDropSeries();
+
+    m_sensitivityChart->setChartType(PaintChartWidget::LineChart);
+    m_sensitivityChart->setXLabel(result.sweptParamName + " (" + result.sweptParamUnit + ")");
+    m_sensitivityChart->setYLabel(tr("Total Pressure Drop (Pa)"));
+    m_sensitivityChart->setTitle(tr("Parameter Sweep: %1 → ΔP").arg(result.sweptParamName));
+
+    // Build x-y pairs for the swept param vs pressure drop
+    QVector<QPointF> data;
+    data.reserve(result.points.size());
+    for (const auto& pt : result.points)
+        data.append(QPointF(pt.paramValue, pt.solution.totalPressureDrop));
+    m_sensitivityChart->setData(data);
+
+    // Also add thrust and Isp as multi-series if available
+    if (result.points.first().solution.hasThrustResults) {
+        QVector<QVector<QPointF>> multi;
+        QStringList labels;
+        multi.append(data);
+        labels.append(tr("Total ΔP"));
+
+        QVector<QPointF> thrustData;
+        for (const auto& pt : result.points)
+            thrustData.append(QPointF(pt.paramValue,
+                pt.solution.hasThrustResults ? pt.solution.thrustResult.thrust_N / 1000.0 : 0.0));
+        multi.append(thrustData);
+        labels.append(tr("Thrust (kN)"));
+
+        m_sensitivityChart->setMultiSeries(multi, labels);
+    }
+
+    m_tabWidget->setCurrentWidget(m_sensitivityTab);
+}
+
+void SolverResultsPanel::onComputeTornado()
+{
+    if (!m_sensitivityScene) return;
+
+    static const QStringList keys = {
+        "inletPressurePa", "inletMassFlow",
+        "fluidDensity", "fluidViscosity",
+        "pipeRoughness", "pipeWallThickness"
+    };
+
+    static const QStringList metricKeys = {
+        "totalPressureDrop", "thrust", "isp", "maxPressure"
+    };
+    QString metric = metricKeys.value(m_tornadoOutputCombo->currentIndex(),
+                                      "totalPressureDrop");
+
+    auto bars = computeTornado(m_sensitivityScene, m_sensitivitySettings, keys, metric,
+                               m_sensitivityInletPressure, m_sensitivityInletFlow);
+
+    setTornadoResults(bars, m_tornadoOutputCombo->currentText());
+}
+
+void SolverResultsPanel::setTornadoResults(
+    const QVector<SensitivityResult::TornadoBar>& bars,
+    const QString& outputMetric)
+{
+    if (bars.isEmpty()) return;
+
+    QStringList labels;
+    QVector<double> negImpacts, posImpacts;
+    labels.reserve(bars.size());
+    negImpacts.reserve(bars.size());
+    posImpacts.reserve(bars.size());
+
+    for (const auto& bar : bars) {
+        labels.append(bar.paramName);
+        negImpacts.append(bar.negativeImpact);
+        posImpacts.append(bar.positiveImpact);
+    }
+
+    m_sensitivityChart->setChartType(PaintChartWidget::TornadoChart);
+    m_sensitivityChart->setTitle(tr("Tornado: %1 Sensitivity").arg(outputMetric));
+    m_sensitivityChart->setTornadoData(labels, negImpacts, posImpacts);
+
+    m_tabWidget->setCurrentWidget(m_sensitivityTab);
+}
+
+// ── Path Profile ────────────────────────────────────────────────────
+
+void SolverResultsPanel::setPathProfile(const QVector<PathProfilePoint>& profile)
+{
+    m_pathProfileTable->setRowCount(profile.size());
+    QVector<QPointF> chartData;
+    chartData.reserve(profile.size());
+
+    for (int i = 0; i < profile.size(); ++i) {
+        const auto& p = profile[i];
+        m_pathProfileTable->setItem(i, 0, new QTableWidgetItem(p.nodeLabel));
+        m_pathProfileTable->setItem(i, 1, new QTableWidgetItem(
+            QString::number(p.cumulativeDistance, 'f', 3)));
+        m_pathProfileTable->setItem(i, 2, new QTableWidgetItem(
+            QString::number(p.pressure, 'e', 3)));
+        chartData.append(QPointF(p.cumulativeDistance, p.pressure));
+    }
+    m_pathProfileTable->resizeColumnsToContents();
+
+    m_pathProfileChart->setChartType(PaintChartWidget::LineChart);
+    m_pathProfileChart->setData(chartData);
+    m_pathProfileChart->setTitle(tr("Path Pressure Profile"));
+
+    m_tabWidget->setCurrentWidget(m_pathProfileTab);
+}
+
+// ── Transient Animation ─────────────────────────────────────────────
+
+void SolverResultsPanel::onTransientPlayPause()
+{
+    if (m_transientHistory.empty()) return;
+
+    if (m_transientPlaying) {
+        m_transientTimer->stop();
+        m_transientPlaying = false;
+        m_transientPlayBtn->setText(tr("▶ Play"));
+    } else {
+        connect(m_transientTimer, &QTimer::timeout,
+                this, &SolverResultsPanel::onTransientFrame, Qt::UniqueConnection);
+        m_transientTimer->start(200); // ~5 fps
+        m_transientPlaying = true;
+        m_transientPlayBtn->setText(tr("⏸ Pause"));
+    }
+}
+
+void SolverResultsPanel::onTransientFrame()
+{
+    if (m_transientHistory.empty()) return;
+    if (m_transientFrame < 0)
+        m_transientFrame = 0;
+    if (m_transientFrame >= static_cast<int>(m_transientHistory.size()))
+        m_transientFrame = static_cast<int>(m_transientHistory.size()) - 1;
+
+    const auto& state = m_transientHistory[m_transientFrame];
+
+    QVector<QPointF> data;
+    data.reserve(state.pressures.size());
+    for (size_t i = 0; i < state.pressures.size(); ++i)
+        data.append(QPointF(static_cast<double>(i), state.pressures[i]));
+
+    m_transientAnimChart->setData(data);
+    m_transientAnimChart->setTitle(
+        tr("Water Hammer — t = %1 s").arg(state.time, 0, 'f', 4));
+
+    m_transientProgress->blockSignals(true);
+    m_transientProgress->setValue(m_transientFrame);
+    m_transientProgress->blockSignals(false);
+
+    // Advance frame; loop back if at end
+    if (m_transientPlaying) {
+        ++m_transientFrame;
+        if (m_transientFrame >= static_cast<int>(m_transientHistory.size())) {
+            m_transientFrame = 0;
+            m_transientTimer->stop();
+            m_transientPlaying = false;
+            m_transientPlayBtn->setText(tr("▶ Play"));
+        }
+    }
 }

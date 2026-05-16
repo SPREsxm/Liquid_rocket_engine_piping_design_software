@@ -686,6 +686,10 @@ void MainWindow::onRunAnalysis()
 
     applySolutionVisualization(sol);
 
+    // Provide context for sensitivity analysis
+    m_resultsDock->setAnalysisContext(m_blockScene, solverSettings,
+                                      inletPressurePa, inletMassFlow);
+
     // Run design rule checks
     double maxDpPa = m_maxPressureDropSpin ? m_maxPressureDropSpin->value() * 1.0e6 : -1.0;
     DesignCheckResult designResult = runDesignChecks(m_blockScene, sol, solverSettings, maxDpPa);

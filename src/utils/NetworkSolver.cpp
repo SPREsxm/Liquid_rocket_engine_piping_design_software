@@ -1098,3 +1098,84 @@ NetworkSolution solveNetworkAuto(BlockScene* scene,
     }
     return sol;
 }
+
+// ─── Path Profile ──────────────────────────────────────────────────
+
+PathProfile computePathProfile(BlockScene* scene,
+                               const NetworkSolution& solution,
+                               const QUuid& startBlockUuid,
+                               const QUuid& endBlockUuid)
+{
+    PathProfile profile;
+    profile.totalLength = 0.0;
+
+    if (!scene) return profile;
+
+    // Build node lookup from solution
+    QHash<QUuid, const NodeState*> nodeByUuid;
+    for (const auto& ns : solution.nodes)
+        nodeByUuid[ns.blockUuid] = &ns;
+
+    // Build edge adjacency
+    struct EdgeInfo { QUuid dstUuid; };
+    QHash<QUuid, QVector<EdgeInfo>> adj;
+    for (const auto& es : solution.edges)
+        adj[es.sourceUuid].append({es.destUuid});
+
+    // BFS from start to end
+    QQueue<QUuid> queue;
+    QHash<QUuid, QUuid> parent;
+    QSet<QUuid> visited;
+    queue.enqueue(startBlockUuid);
+    visited.insert(startBlockUuid);
+
+    while (!queue.isEmpty()) {
+        QUuid cur = queue.dequeue();
+        if (cur == endBlockUuid) break;
+        for (const auto& ei : adj.value(cur)) {
+            if (!visited.contains(ei.dstUuid)) {
+                visited.insert(ei.dstUuid);
+                parent[ei.dstUuid] = cur;
+                queue.enqueue(ei.dstUuid);
+            }
+        }
+    }
+
+    if (!parent.contains(endBlockUuid) && startBlockUuid != endBlockUuid)
+        return profile;
+
+    // Reconstruct path
+    QVector<QUuid> path;
+    QUuid cur = endBlockUuid;
+    while (true) {
+        path.prepend(cur);
+        if (cur == startBlockUuid) break;
+        if (!parent.contains(cur)) break;
+        cur = parent[cur];
+    }
+
+    // Build profile points
+    double dist = 0.0;
+    for (int i = 0; i < path.size(); ++i) {
+        const NodeState* ns = nodeByUuid.value(path[i], nullptr);
+
+        PathProfilePoint pt;
+        pt.cumulativeDistance = dist;
+        pt.pressure = ns ? ns->pressure : 0.0;
+        pt.nodeLabel = ns ? ns->blockLabel : path[i].toString(QUuid::WithoutBraces).left(8);
+        profile.points.append(pt);
+
+        if (i + 1 < path.size()) {
+            BlockItem* block = scene->blockByUuid(path[i]);
+            if (block) {
+                QVariant lenVal = block->propertyValue("length");
+                dist += lenVal.isValid() ? lenVal.toDouble() : 0.5;
+            } else {
+                dist += 0.5;
+            }
+        }
+    }
+
+    profile.totalLength = dist;
+    return profile;
+}
