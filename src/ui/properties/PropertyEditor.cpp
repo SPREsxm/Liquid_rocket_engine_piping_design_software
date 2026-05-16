@@ -274,8 +274,6 @@ void PropertyEditor::rebuildFormBatch(const QList<BlockItem*>& blocks)
     m_formLayout->addRow(sep);
 
     // Custom label — check if all same
-    QVariant commonLabel = commonValue(blocks, QString()); // special: use customLabel
-    // Actually, check custom labels
     QString firstLabel = blocks.first()->customLabel();
     bool sameLabel = true;
     for (const auto* b : blocks) {

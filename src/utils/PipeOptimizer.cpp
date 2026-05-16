@@ -53,19 +53,23 @@ OptimizationResult optimizePipeSchedules(
     }
 
     // Store original NPS/schedule assignments and compute initial weight
-    QHash<QUuid, double> origNPS;
-    QHash<QUuid, QString> origSchedule;
+    QHash<QUuid, double> saveOrigNPS;
+    QHash<QUuid, QString> saveOrigSchedule;
     double origWeight = 0.0;
     for (auto* pipe : pipes) {
         double nps = pipe->propertyValue("nps").toDouble();
         QString sch = pipe->propertyValue("schedule").toString();
         if (sch.isEmpty()) sch = db.defaultSchedule(nps);
-        origNPS[pipe->uuid()] = nps;
-        origSchedule[pipe->uuid()] = sch;
+        saveOrigNPS[pipe->uuid()] = nps;
+        saveOrigSchedule[pipe->uuid()] = sch;
         origWeight += pipeWeight_kg(nps, sch,
                                     pipe->propertyValue("length").toDouble());
     }
     result.originalTotalWeight_kg = origWeight;
+
+    // Working copy: updated during optimization to track current best
+    QHash<QUuid, double> curNPS = saveOrigNPS;
+    QHash<QUuid, QString> curSchedule = saveOrigSchedule;
 
     // ── Greedy optimization: 3 passes ─────────────────────────
     constexpr int kMaxPasses = 3;
@@ -79,8 +83,8 @@ OptimizationResult optimizePipeSchedules(
             double length = pipe->propertyValue("length").toDouble();
             if (length <= 0.0) length = 1.0;
 
-            double bestNPS = origNPS[pipe->uuid()];
-            QString bestSchedule = origSchedule[pipe->uuid()];
+            double bestNPS = curNPS[pipe->uuid()];
+            QString bestSchedule = curSchedule[pipe->uuid()];
             double bestWeight = pipeWeight_kg(bestNPS, bestSchedule, length);
             bool foundValid = false;
 
@@ -98,14 +102,10 @@ OptimizationResult optimizePipeSchedules(
                     if (foundValid && w >= bestWeight) continue;
                     if (!foundValid && w > bestWeight * 1.1) continue;
 
-                    // Apply candidate
+                    // Apply candidate (only NPS+schedule; diameter
+                    // is derived from schedule DB by downstream checks)
                     pipe->setPropertyValue("nps", nps);
                     pipe->setPropertyValue("schedule", sch);
-
-                    // Update diameter from lookup table
-                    auto innerD = db.innerDiameter(nps, sch);
-                    if (innerD.has_value())
-                        pipe->setPropertyValue("diameter", innerD.value() / 1000.0); // mm→m
 
                     // Re-solve network
                     NetworkSolution sol = solveNetworkAuto(
@@ -130,18 +130,15 @@ OptimizationResult optimizePipeSchedules(
             }
 
             // Restore best (or original) settings
-            if (foundValid && qAbs(bestWeight - pipeWeight_kg(origNPS[pipe->uuid()],
-                                                               origSchedule[pipe->uuid()], length)) > 0.001) {
+            if (foundValid && qAbs(bestWeight - pipeWeight_kg(curNPS[pipe->uuid()],
+                                                               curSchedule[pipe->uuid()], length)) > 0.001) {
                 improved.insert(pipe->uuid());
             }
             pipe->setPropertyValue("nps", bestNPS);
             pipe->setPropertyValue("schedule", bestSchedule);
-            auto innerD = db.innerDiameter(bestNPS, bestSchedule);
-            if (innerD.has_value())
-                pipe->setPropertyValue("diameter", innerD.value() / 1000.0);
 
-            origNPS[pipe->uuid()] = bestNPS;
-            origSchedule[pipe->uuid()] = bestSchedule;
+            curNPS[pipe->uuid()] = bestNPS;
+            curSchedule[pipe->uuid()] = bestSchedule;
         }
 
         if (improved.isEmpty()) break; // converged
@@ -150,27 +147,26 @@ OptimizationResult optimizePipeSchedules(
     // ── Build result ─────────────────────────────────────────
     double optWeight = 0.0;
     for (auto* pipe : pipes) {
-        double oldNps = pipe->propertyValue("nps").toDouble();
-        QString oldSch = pipe->propertyValue("schedule").toString();
         double length = pipe->propertyValue("length").toDouble();
         if (length <= 0.0) length = 1.0;
+
+        double newNps = pipe->propertyValue("nps").toDouble();
+        QString newSch = pipe->propertyValue("schedule").toString();
+        double origNpsVal = saveOrigNPS.value(pipe->uuid());
+        QString origSchVal = saveOrigSchedule.value(pipe->uuid());
 
         OptimizationResult::PipeSelection sel;
         sel.blockUuid = pipe->uuid();
         sel.blockLabel = pipe->customLabel().isEmpty() ? pipe->typeId() : pipe->customLabel();
-        sel.newNPS = oldNps;
-        sel.newSchedule = oldSch;
-        sel.newWeight_kg = pipeWeight_kg(oldNps, oldSch, length);
-
-        // Original weight
-        QVariant savedNps = pipe->propertyValue("nps");  // already updated above
-        sel.oldNPS = sel.newNPS;
-        sel.oldSchedule = sel.newSchedule;
-        sel.oldWeight_kg = sel.newWeight_kg;
-        sel.changed = false;
+        sel.oldNPS = origNpsVal;
+        sel.oldSchedule = origSchVal;
+        sel.oldWeight_kg = pipeWeight_kg(origNpsVal, origSchVal, length);
+        sel.newNPS = newNps;
+        sel.newSchedule = newSch;
+        sel.newWeight_kg = pipeWeight_kg(newNps, newSch, length);
+        sel.changed = (origNpsVal != newNps || origSchVal != newSch);
 
         optWeight += sel.newWeight_kg;
-
         result.selections.append(sel);
     }
 

@@ -145,8 +145,15 @@ ThermalStressResult computeThermalStress(
 
         FluidStructureInteraction::FluidCoupling fluidCoup;
         fluidCoup.pressure_Pa = qAbs(pressure);
-        fluidCoup.bulkModulus_Pa = settings.fluidDensity > 0.0
-            ? 1.0e9 : 2.18e9; // approximate bulk modulus
+        // Fluid bulk modulus lookup (Pa) — used for Korteweg wave speed
+        switch (settings.fluidType) {
+        case FluidType::LOX:   fluidCoup.bulkModulus_Pa = 0.97e9; break;
+        case FluidType::RP1:   fluidCoup.bulkModulus_Pa = 1.50e9; break;
+        case FluidType::CH4:   fluidCoup.bulkModulus_Pa = 0.85e9; break;
+        case FluidType::LH2:   fluidCoup.bulkModulus_Pa = 0.12e9; break;
+        case FluidType::Water: fluidCoup.bulkModulus_Pa = 2.18e9; break;
+        default:               fluidCoup.bulkModulus_Pa = 1.0e9; break;
+        }
         fluidCoup.density_kgpm3 = rho;
 
         auto stress = FluidStructureInteraction::computeStresses(pipeMech, fluidCoup);
