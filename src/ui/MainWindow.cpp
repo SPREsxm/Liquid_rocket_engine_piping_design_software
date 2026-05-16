@@ -4,9 +4,11 @@
 #include "ui/graphics/BlockItem.h"
 #include "ui/graphics/BlockView.h"
 #include "ui/graphics/ConnectionItem.h"
+#include "ui/graphics/LegendWidget.h"
 #include "ui/graphics/PortItem.h"
 #include "ui/library/LibraryTreeModel.h"
 #include "ui/library/LibraryTreeView.h"
+#include "ui/library/ComponentFilterProxy.h"
 #include "ui/properties/PropertyEditor.h"
 #include "PreferencesDialog.h"
 #include "SolverResultsPanel.h"
@@ -15,6 +17,8 @@
 #include "utils/TransientSolver.h"
 #include "utils/Benchmark.h"
 #include "utils/GridRefinement.h"
+#include "utils/DesignRules.h"
+#include "utils/BomGenerator.h"
 #include "components/ComponentFactory.h"
 #include "components/ComponentDescriptor.h"
 #include "core/Constants.h"
@@ -35,15 +39,19 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPageSize>
 #include <QPdfWriter>
 #include <QPixmap>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QSvgGenerator>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
 #include <QUndoStack>
 #include <QVBoxLayout>
@@ -87,6 +95,12 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     restoreSettings();
+
+    // Autosave — check for recovery files first, then start timer
+    checkAutosaveRecovery();
+    m_autosaveTimer = new QTimer(this);
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::onAutosave);
+    m_autosaveTimer->start(120000); // 2 minutes
 
     loadPlugins();
 
@@ -165,6 +179,7 @@ void MainWindow::createActions()
     connect(am.action(ActionId::Save),   &QAction::triggered, this, &MainWindow::onSave);
     connect(am.action(ActionId::SaveAs), &QAction::triggered, this, &MainWindow::onSaveAs);
     connect(am.action(ActionId::Export_),&QAction::triggered, this, &MainWindow::onExport);
+    connect(am.action(ActionId::Print),  &QAction::triggered, this, &MainWindow::onPrint);
 
     // View — Zoom
     connect(am.action(ActionId::ZoomIn),  &QAction::triggered, this, &MainWindow::onZoomIn);
@@ -224,6 +239,7 @@ void MainWindow::createActions()
     // Tools
     connect(am.action(ActionId::RunAnalysis), &QAction::triggered, this, &MainWindow::onRunAnalysis);
     connect(am.action(ActionId::Validate), &QAction::triggered, this, &MainWindow::onValidate);
+    connect(am.action(ActionId::GenerateBom), &QAction::triggered, this, &MainWindow::onGenerateBom);
     connect(am.action(ActionId::Preferences), &QAction::triggered, this, &MainWindow::onPreferences);
 
     // Help
@@ -244,6 +260,7 @@ void MainWindow::createMenus()
     m_fileMenu->addAction(am.action(ActionId::SaveAs));
     m_fileMenu->addSeparator();
     m_fileMenu->addAction(am.action(ActionId::Export_));
+    m_fileMenu->addAction(am.action(ActionId::Print));
     m_fileMenu->addSeparator();
     m_recentFilesMenu = m_fileMenu->addMenu(tr("&Recent Files"));
     updateRecentFilesMenu();
@@ -278,6 +295,7 @@ void MainWindow::createMenus()
     m_toolsMenu = menuBar()->addMenu(tr("&Tools"));
     m_toolsMenu->addAction(am.action(ActionId::RunAnalysis));
     m_toolsMenu->addAction(am.action(ActionId::Validate));
+    m_toolsMenu->addAction(am.action(ActionId::GenerateBom));
     m_toolsMenu->addSeparator();
     m_toolsMenu->addAction(am.action(ActionId::Preferences));
 
@@ -349,6 +367,21 @@ void MainWindow::createToolBar()
     m_fluidTypeCombo->setToolTip(tr("Working fluid — sets density and viscosity defaults"));
     m_fluidTypeCombo->setMaximumWidth(100);
     m_mainToolBar->addWidget(m_fluidTypeCombo);
+
+    // ── Max pressure drop budget ──
+    m_mainToolBar->addSeparator();
+    auto* maxDpLabel = new QLabel(tr(" ΔP_max:"));
+    m_mainToolBar->addWidget(maxDpLabel);
+
+    m_maxPressureDropSpin = new QDoubleSpinBox;
+    m_maxPressureDropSpin->setRange(0.0, 100.0);
+    m_maxPressureDropSpin->setDecimals(3);
+    m_maxPressureDropSpin->setSuffix(" MPa");
+    m_maxPressureDropSpin->setSpecialValueText(tr("Off"));
+    m_maxPressureDropSpin->setValue(0.0);
+    m_maxPressureDropSpin->setToolTip(tr("Max allowed pressure drop (0 = disabled)"));
+    m_maxPressureDropSpin->setMaximumWidth(110);
+    m_mainToolBar->addWidget(m_maxPressureDropSpin);
 }
 
 // ─── StatusBar ──────────────────────────────────────────────
@@ -374,10 +407,34 @@ void MainWindow::createDockWidgets()
     m_libraryDock = new QDockWidget(tr("Component Library"), this);
     m_libraryDock->setObjectName("LibraryDock");
     m_libraryDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+
     m_libraryModel = new LibraryTreeModel(m_componentFactory, this);
     m_libraryView  = new LibraryTreeView;
-    m_libraryView->setModel(m_libraryModel);
-    m_libraryDock->setWidget(m_libraryView);
+
+    // Filter proxy
+    m_libraryFilterProxy = new ComponentFilterProxy(this);
+    m_libraryFilterProxy->setSourceModel(m_libraryModel);
+    m_libraryFilterProxy->setFilterKeyColumn(0);
+    m_libraryView->setModel(m_libraryFilterProxy);
+
+    // Search box
+    m_librarySearchBox = new QLineEdit;
+    m_librarySearchBox->setPlaceholderText(tr("Filter components..."));
+    m_librarySearchBox->setClearButtonEnabled(true);
+    connect(m_librarySearchBox, &QLineEdit::textChanged, this,
+            [this](const QString& text) {
+        m_libraryFilterProxy->setFilterWildcard(text);
+        m_libraryView->expandAll();
+    });
+
+    auto* libContainer = new QWidget;
+    auto* libLayout = new QVBoxLayout(libContainer);
+    libLayout->setContentsMargins(4, 4, 4, 4);
+    libLayout->setSpacing(4);
+    libLayout->addWidget(m_librarySearchBox);
+    libLayout->addWidget(m_libraryView);
+    m_libraryDock->setWidget(libContainer);
+
     addDockWidget(Qt::LeftDockWidgetArea, m_libraryDock);
 
     // Property editor (right)
@@ -408,6 +465,14 @@ void MainWindow::createDockWidgets()
     addDockWidget(Qt::BottomDockWidgetArea, m_resultsDock);
     tabifyDockWidget(m_messageDock, m_resultsDock);
     m_messageDock->raise(); // show messages by default
+
+    // Flow/Pressure color legend (right)
+    m_legendWidget = new LegendWidget;
+    m_legendDock = new QDockWidget(tr("Flow Legend"), this);
+    m_legendDock->setObjectName("LegendDock");
+    m_legendDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_legendDock->setWidget(m_legendWidget);
+    addDockWidget(Qt::RightDockWidgetArea, m_legendDock);
 }
 
 // ─── Central Widget ─────────────────────────────────────────
@@ -486,6 +551,7 @@ void MainWindow::onSave()
     m_statusLabel->setText(tr("Saved: %1").arg(m_currentFilePath));
     appendMessage("Saved: " + m_currentFilePath);
     addToRecentFiles(m_currentFilePath);
+    removeAutosaveFile();
 }
 
 void MainWindow::onSaveAs()
@@ -545,6 +611,39 @@ void MainWindow::onExport()
     m_statusLabel->setText(tr("Exported to: %1").arg(path));
 }
 
+void MainWindow::onPrint()
+{
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setPageSize(QPageSize::A4);
+
+    QPrintDialog dlg(&printer, this);
+    dlg.setWindowTitle(tr("Print Schematic Diagram"));
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    QRectF bounds = m_blockScene->itemsBoundingRect().adjusted(-10, -10, 10, 10);
+    if (bounds.isEmpty()) bounds = QRectF(-200, -200, 400, 400);
+
+    QPainter painter(&printer);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // Scale scene to fit page
+    QRectF pageRect = printer.pageRect(QPrinter::DevicePixel);
+    double scaleX = pageRect.width() / bounds.width();
+    double scaleY = pageRect.height() / bounds.height();
+    double scale = std::min(scaleX, scaleY);
+
+    painter.save();
+    painter.scale(scale, scale);
+    painter.translate(-bounds.topLeft());
+    m_blockScene->render(&painter, QRectF(), bounds);
+    painter.restore();
+
+    painter.end();
+    appendMessage("Printed schematic diagram.");
+    m_statusLabel->setText(tr("Printed schematic diagram"));
+}
+
 // ─── Tools ──────────────────────────────────────────────────
 
 void MainWindow::onRunAnalysis()
@@ -570,6 +669,7 @@ void MainWindow::onRunAnalysis()
     QSettings settings;
     solverSettings.fluidDensity = settings.value("Solver/FluidDensity", fProps.density).toDouble();
     solverSettings.fluidViscosity = settings.value("Solver/FluidViscosity", fProps.viscosity).toDouble();
+    solverSettings.fluidType = fType;
 
     NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings,
                                            inletPressurePa, inletMassFlow);
@@ -585,6 +685,30 @@ void MainWindow::onRunAnalysis()
     }
 
     applySolutionVisualization(sol);
+
+    // Run design rule checks
+    double maxDpPa = m_maxPressureDropSpin ? m_maxPressureDropSpin->value() * 1.0e6 : -1.0;
+    DesignCheckResult designResult = runDesignChecks(m_blockScene, sol, solverSettings, maxDpPa);
+    m_resultsDock->setDesignCheckResults(designResult);
+    if (designResult.errorCount() > 0)
+        appendMessage(QString("Design checks: %1 error(s), %2 warning(s)")
+            .arg(designResult.errorCount()).arg(designResult.warningCount()));
+
+    // Generate BOM data for report inclusion
+    BomResult bom = generateBom(m_blockScene);
+    m_resultsDock->setBomData(bom);
+
+    // Run transient water hammer simulation
+    TransientSolver transSolver;
+    transSolver.setTargetCourant(solverSettings.targetCourant);
+    transSolver.setDefaultRoughness(solverSettings.pipeRoughness);
+    transSolver.setDefaultYoungsModulus(solverSettings.pipeYoungsModulus);
+    transSolver.setDefaultWallThickness(solverSettings.pipeWallThickness);
+    TransientResult trans = transSolver.simulateWaterHammer(
+        sol, m_blockScene, 0.050, solverSettings.gridBaseNodes,
+        solverSettings.timeStepSeconds);
+    m_resultsDock->setTransientResults(trans);
+    appendMessage(trans.message);
 
     m_blockScene->update();
     m_statusLabel->setText(tr("Analysis complete — %1 nodes, %2 edges, ΔP=%3 Pa")
@@ -631,6 +755,7 @@ void MainWindow::onValidate()
         QSettings settings;
         solverSettings.fluidDensity = settings.value("Solver/FluidDensity", fProps.density).toDouble();
         solverSettings.fluidViscosity = settings.value("Solver/FluidViscosity", fProps.viscosity).toDouble();
+        solverSettings.fluidType = fType;
 
         NetworkSolution sol = solveNetworkAuto(m_blockScene, solverSettings,
                                                inletPressurePa, inletMassFlow);
@@ -647,6 +772,9 @@ void MainWindow::onValidate()
             // 3a. Transient water hammer simulation
             TransientSolver transSolver;
             transSolver.setTargetCourant(solverSettings.targetCourant);
+            transSolver.setDefaultRoughness(solverSettings.pipeRoughness);
+            transSolver.setDefaultYoungsModulus(solverSettings.pipeYoungsModulus);
+            transSolver.setDefaultWallThickness(solverSettings.pipeWallThickness);
             TransientResult trans = transSolver.simulateWaterHammer(
                 sol, m_blockScene, 0.050, solverSettings.gridBaseNodes,
                 solverSettings.timeStepSeconds);
@@ -676,6 +804,33 @@ void MainWindow::onPreferences()
     if (dlg.exec() == QDialog::Accepted) {
         m_blockView->viewport()->update();
         appendMessage("Preferences updated.");
+    }
+}
+
+void MainWindow::onGenerateBom()
+{
+    BomResult bom = generateBom(m_blockScene);
+    if (bom.lines.isEmpty()) {
+        QMessageBox::information(this, tr("BOM"),
+            tr("No components in the scene."));
+        return;
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(
+        this, tr("Export BOM"), "bom.csv",
+        tr("CSV Files (*.csv)"));
+    if (filePath.isEmpty()) return;
+
+    if (exportBomCsv(bom, filePath)) {
+        appendMessage(QString("BOM exported to %1 — %2 items, total %3 kg")
+            .arg(filePath).arg(bom.lines.size()).arg(bom.totalWeight, 0, 'f', 1));
+        QMessageBox::information(this, tr("BOM Export"),
+            tr("BOM saved to:\n%1\n\n%2 items, total %3 kg")
+                .arg(filePath).arg(bom.lines.size())
+                .arg(bom.totalWeight, 0, 'f', 1));
+    } else {
+        QMessageBox::warning(this, tr("BOM Export"),
+            tr("Failed to write BOM file."));
     }
 }
 
@@ -851,6 +1006,7 @@ void MainWindow::applySolutionVisualization(const NetworkSolution& sol)
             if (edge.sourceUuid == sb->uuid() &&
                 edge.destUuid == db->uuid()) {
                 conn->setFlowData(std::abs(edge.massFlowRate), maxFlow);
+                conn->setAnalysisTooltip(edge.pressureDrop, edge.massFlowRate);
                 break;
             }
         }
@@ -858,7 +1014,15 @@ void MainWindow::applySolutionVisualization(const NetworkSolution& sol)
 
     for (const auto& node : sol.nodes) {
         auto* b = blockMap.value(node.blockUuid);
-        if (b) b->setPressure(node.pressure);
+        if (b) {
+            b->setPressure(node.pressure);
+            b->setAnalysisTooltip(node.pressure, node.inletFlow, node.outletFlow);
+        }
+    }
+
+    if (m_legendWidget) {
+        m_legendWidget->setFlowRange(0.0, maxFlow);
+        m_legendWidget->setPressureRange(sol.minPressure(), sol.maxPressure());
     }
 
     m_blockScene->update();
@@ -871,4 +1035,71 @@ void MainWindow::closeEvent(QCloseEvent* event)
     } else {
         event->ignore();
     }
+}
+
+// ─── Autosave ───────────────────────────────────────────────────
+
+QString MainWindow::autosavePath() const
+{
+    if (!m_currentFilePath.isEmpty())
+        return m_currentFilePath + ".autosave";
+    return QCoreApplication::applicationDirPath() + "/.autosave.lrep";
+}
+
+void MainWindow::onAutosave()
+{
+    if (!m_isDirty) return;
+
+    QFile file(autosavePath());
+    if (!file.open(QIODevice::WriteOnly)) {
+        appendMessage("Autosave: failed to write " + autosavePath());
+        return;
+    }
+
+    QJsonDocument doc(m_blockScene->toJson());
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+
+    appendMessage("Autosave: saved to " + autosavePath());
+}
+
+void MainWindow::checkAutosaveRecovery()
+{
+    QString path = autosavePath();
+    if (!QFile::exists(path)) return;
+
+    const auto btn = QMessageBox::question(this, tr("Recover Unsaved Work"),
+        tr("An autosave file was found from a previous session.\n\n"
+           "File: %1\n\nRecover this file?").arg(path),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (btn != QMessageBox::Yes) {
+        removeAutosaveFile();
+        return;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return;
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
+    file.close();
+
+    if (err.error != QJsonParseError::NoError) {
+        appendMessage("Autosave recovery: JSON parse error");
+        removeAutosaveFile();
+        return;
+    }
+
+    m_blockScene->fromJson(doc.object());
+    setDirty(true);
+    appendMessage("Recovered autosave from " + path);
+    m_statusLabel->setText(tr("Recovered autosave"));
+}
+
+void MainWindow::removeAutosaveFile()
+{
+    QString path = autosavePath();
+    if (QFile::exists(path))
+        QFile::remove(path);
 }

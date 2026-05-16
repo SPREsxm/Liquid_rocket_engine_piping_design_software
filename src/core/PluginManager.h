@@ -53,7 +53,7 @@ private:
     PluginManager& operator=(const PluginManager&) = delete;
 
     struct PluginEntry {
-        QLibrary* library = nullptr;
+        std::shared_ptr<QLibrary> library;
         IPlugin* instance = nullptr;
         DestroyPluginFunc destroy = nullptr;
         QList<PluginComponentInfo> componentInfos;

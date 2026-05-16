@@ -25,6 +25,14 @@ add_executable(lrep_tests
     test_NetworkValidator.cpp
     test_IdGenerator.cpp
     test_Constants.cpp
+    test_ResultExporter.cpp
+    test_PaintChart.cpp
+    test_PipeScheduleDatabase.cpp
+    test_PluginManager.cpp
+    test_LibraryTreeModel.cpp
+    test_ReportGenerator.cpp
+    test_DesignRules.cpp
+    test_BomGenerator.cpp
 )
 
 target_include_directories(lrep_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")
@@ -46,3 +54,15 @@ endif()
 
 include(CTest)
 add_test(NAME lrep_tests COMMAND lrep_tests)
+
+# Ensure Qt bin directory is on PATH for runtime DLL resolution
+if(Qt6_FOUND AND Qt6_DIR)
+    # Qt6_DIR = <prefix>/lib/cmake/Qt6, so go up 3 levels to get <prefix>
+    get_filename_component(_qt6_cmake_dir "${Qt6_DIR}" DIRECTORY)
+    get_filename_component(_qt6_lib_dir   "${_qt6_cmake_dir}" DIRECTORY)
+    get_filename_component(_qt6_prefix    "${_qt6_lib_dir}" DIRECTORY)
+    if(EXISTS "${_qt6_prefix}/bin")
+        set_tests_properties(lrep_tests PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_qt6_prefix}/bin")
+    endif()
+endif()

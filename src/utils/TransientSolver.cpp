@@ -156,6 +156,9 @@ TransientSolver::PipeParams TransientSolver::preparePipeParams(
     const NetworkSolution& steady, BlockScene* scene, int /*spatialNodes*/) const
 {
     PipeParams pp;
+    // Apply configurable defaults
+    pp.roughness = m_defaultRoughness;
+    pp.youngsModulus = m_defaultYoungsModulus;
 
     // Extract from path blocks for fluid/material properties
     QHash<QUuid, BlockItem*> blockMap;
@@ -169,16 +172,17 @@ TransientSolver::PipeParams TransientSolver::preparePipeParams(
         double d = getBlockProp(b, "diameter", -1.0);
         if (d > 0.0) {
             pp.diameter = d;
-            pp.wallThickness = d / 20.0;
+            pp.wallThickness = (m_defaultWallThickness > 0.0)
+                ? m_defaultWallThickness : d / 20.0;
         }
         double r = getBlockProp(b, "roughness", -1.0);
-        if (r >= 0.0) pp.roughness = r;
+        if (r >= 0.0) pp.roughness = r; // per-block override
 
         QVariant mat = b->propertyValue("material");
         if (mat.isValid()) {
             const auto modMap = materialModulus();
             auto it = modMap.find(mat.toString());
-            if (it != modMap.end()) pp.youngsModulus = it.value();
+            if (it != modMap.end()) pp.youngsModulus = it.value(); // per-block override
         }
         break; // use first pipe block
     }

@@ -8,7 +8,7 @@ add_library(lrep_ui STATIC
 )
 
 target_include_directories(lrep_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(lrep_ui PUBLIC Qt6::Widgets Qt6::Svg lrep_core lrep_components)
+target_link_libraries(lrep_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::PrintSupport lrep_core lrep_components)
 set_project_warnings(lrep_ui)
 
 add_subdirectory(actions)

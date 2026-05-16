@@ -97,4 +97,42 @@ void ComponentFactory::registerBuiltins()
     registerComponent(ComponentDescriptor::createInjector());
     registerComponent(ComponentDescriptor::createNozzle());
     registerComponent(ComponentDescriptor::createDiffuser());
+
+    // ── 2.1 推进剂供应系统 ──
+    registerComponent(ComponentDescriptor::createTurbopump());
+    registerComponent(ComponentDescriptor::createGasTurbine());
+    registerComponent(ComponentDescriptor::createOxidizerPump());
+    registerComponent(ComponentDescriptor::createFuelPump());
+    registerComponent(ComponentDescriptor::createBoostPump());
+    registerComponent(ComponentDescriptor::createMainValve());
+    registerComponent(ComponentDescriptor::createSecondaryValve());
+    registerComponent(ComponentDescriptor::createFillValve());
+    registerComponent(ComponentDescriptor::createVentValve());
+
+    // ── 2.2 增压系统 ──
+    registerComponent(ComponentDescriptor::createHighPressureBottle());
+    registerComponent(ComponentDescriptor::createPressureRegulator());
+    registerComponent(ComponentDescriptor::createSelectorValve());
+
+    // ── 2.3 输送管路系统 ──
+    registerComponent(ComponentDescriptor::createCrossFitting());
+    registerComponent(ComponentDescriptor::createFilter());
+    registerComponent(ComponentDescriptor::createAccumulator());
+    registerComponent(ComponentDescriptor::createCompensator());
+    registerComponent(ComponentDescriptor::createTemperatureSensor());
+
+    // ── 2.4 发动机本体供应系统 ──
+    registerComponent(ComponentDescriptor::createGasGenerator());
+    registerComponent(ComponentDescriptor::createIgniter());
+    registerComponent(ComponentDescriptor::createHeatExchanger());
+    registerComponent(ComponentDescriptor::createFlowRegulator());
+    registerComponent(ComponentDescriptor::createThrottleValve());
+    registerComponent(ComponentDescriptor::createCavitatingVenturi());
+    registerComponent(ComponentDescriptor::createThrottleOrifice());
+
+    // ── 2.5 安全与辅助系统 ──
+    registerComponent(ComponentDescriptor::createPurgeValve());
+    registerComponent(ComponentDescriptor::createReliefValve());
+    registerComponent(ComponentDescriptor::createBurstDisk());
+    registerComponent(ComponentDescriptor::createFlowMeter());
 }

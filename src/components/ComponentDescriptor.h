@@ -45,4 +45,42 @@ struct ComponentDescriptor {
     static ComponentDescriptor createInjector();
     static ComponentDescriptor createNozzle();
     static ComponentDescriptor createDiffuser();
+
+    // ── 2.1 推进剂供应系统 ──
+    static ComponentDescriptor createTurbopump();
+    static ComponentDescriptor createGasTurbine();
+    static ComponentDescriptor createOxidizerPump();
+    static ComponentDescriptor createFuelPump();
+    static ComponentDescriptor createBoostPump();
+    static ComponentDescriptor createMainValve();
+    static ComponentDescriptor createSecondaryValve();
+    static ComponentDescriptor createFillValve();
+    static ComponentDescriptor createVentValve();
+
+    // ── 2.2 增压系统 ──
+    static ComponentDescriptor createHighPressureBottle();
+    static ComponentDescriptor createPressureRegulator();
+    static ComponentDescriptor createSelectorValve();
+
+    // ── 2.3 输送管路系统 ──
+    static ComponentDescriptor createCrossFitting();
+    static ComponentDescriptor createFilter();
+    static ComponentDescriptor createAccumulator();
+    static ComponentDescriptor createCompensator();
+    static ComponentDescriptor createTemperatureSensor();
+
+    // ── 2.4 发动机本体供应系统 ──
+    static ComponentDescriptor createGasGenerator();
+    static ComponentDescriptor createIgniter();
+    static ComponentDescriptor createHeatExchanger();
+    static ComponentDescriptor createFlowRegulator();
+    static ComponentDescriptor createThrottleValve();
+    static ComponentDescriptor createCavitatingVenturi();
+    static ComponentDescriptor createThrottleOrifice();
+
+    // ── 2.5 安全与辅助系统 ──
+    static ComponentDescriptor createPurgeValve();
+    static ComponentDescriptor createReliefValve();
+    static ComponentDescriptor createBurstDisk();
+    static ComponentDescriptor createFlowMeter();
 };

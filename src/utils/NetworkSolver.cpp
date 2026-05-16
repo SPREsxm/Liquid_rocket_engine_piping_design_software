@@ -7,6 +7,8 @@
 #include "core/Types.h"
 #include "FluidDynamics.h"
 #include "ResistanceCoefficients.h"
+#include "SSTTurbulence.h"
+#include "PropellantProperties.h"
 
 #include <QQueue>
 #include <QSet>
@@ -31,13 +33,23 @@ double getProp(BlockItem* b, const QString& id, double fallback) {
 }
 
 double pipeResistance(double length, double diameter, double roughness,
-                      double density, double viscosity, double massFlow) {
+                      double density, double viscosity, double massFlow,
+                      bool useSST = true) {
     if (diameter <= 0.0 || density <= 0.0) return 1e12;
     const double A = M_PI * diameter * diameter / 4.0;
     const double velocity = massFlow / (density * A);
     const double reynolds = density * velocity * diameter / viscosity;
-    const double lambda = FluidDynamics::calculateColebrookWhiteFrictionFactor(
-        reynolds, roughness, diameter);
+
+    double lambda;
+    if (useSST && reynolds > 4000.0) {
+        // SST k-ω turbulence model for turbulent pipe flow
+        lambda = SSTTurbulence::effectiveFrictionFactorSST(
+            reynolds, roughness, diameter, density, viscosity, velocity);
+    } else {
+        // Colebrook-White for laminar, transition, and SST fallback
+        lambda = FluidDynamics::calculateColebrookWhiteFrictionFactor(
+            reynolds, roughness, diameter);
+    }
     const double d5 = std::pow(diameter, 5);
     return 8.0 * lambda * length / (M_PI * M_PI * d5 * density);
 }
@@ -57,6 +69,16 @@ ResistanceCoefficients::FittingType fittingTypeForComponent(const QString& typeI
     if (typeId == "valve.solenoid")    return RT::GateValve_FullyOpen; // solenoid ≈ gate
     if (typeId == "valve.check")       return RT::SwingCheckValve;
     if (typeId == "valve.butterfly")   return RT::ButterflyValve;
+    if (typeId == "valve.main")        return RT::GateValve_FullyOpen;
+    if (typeId == "valve.secondary")   return RT::BallValve_FullyOpen;
+    if (typeId == "valve.fill")        return RT::BallValve_FullyOpen;
+    if (typeId == "valve.vent")        return RT::GlobeValve_FullyOpen;
+    if (typeId == "valve.regulator")   return RT::GlobeValve_FullyOpen;
+    if (typeId == "valve.selector")    return RT::BallValve_FullyOpen;
+    if (typeId == "valve.flowRegulator") return RT::GlobeValve_FullyOpen;
+    if (typeId == "valve.throttle")    return RT::ButterflyValve;
+    if (typeId == "valve.purge")       return RT::GateValve_FullyOpen;
+    if (typeId == "valve.relief")      return RT::GlobeValve_FullyOpen;
     if (typeId == "pipe.elbow")        return RT::Elbow90_Flanged;
     if (typeId == "pipe.elbow45")      return RT::Elbow45_Flanged;
     if (typeId == "pipe.tee")          return RT::Tee_Branch;
@@ -70,21 +92,63 @@ bool isFittingType(const QString& typeId) {
     static const QSet<QString> fittings = {
         "valve.gate", "valve.globe", "valve.ball", "valve.solenoid",
         "valve.check", "valve.butterfly",
-        "pipe.elbow", "pipe.elbow45", "pipe.tee", "pipe.teestraight"
+        "valve.main", "valve.secondary", "valve.fill", "valve.vent",
+        "valve.regulator", "valve.selector", "valve.flowRegulator",
+        "valve.throttle", "valve.purge", "valve.relief",
+        "pipe.elbow", "pipe.elbow45", "pipe.tee", "pipe.teestraight",
+        "pipe.cross", "pipe.filter", "pipe.cavitatingVenturi",
+        "pipe.throttleOrifice", "pipe.compensator"
     };
     return fittings.contains(typeId);
 }
 
 double computeEdgeResistance(BlockItem* srcBlock, PortItem*,
-                             double massFlow, double rho, double mu) {
+                             double massFlow, double rho, double mu,
+                             bool useSST = true,
+                             double defaultRoughness = kDefaultRoughness) {
     const QString& typeId = srcBlock->typeId();
     const double d   = getProp(srcBlock, "diameter", kDefaultDiameter);
-    const double eps = getProp(srcBlock, "roughness", kDefaultRoughness);
+    const double eps = getProp(srcBlock, "roughness", defaultRoughness);
 
     // Explicit loss coefficient overrides everything
     QVariant zetaV = srcBlock->propertyValue("lossCoefficient");
     if (zetaV.isValid() && zetaV.toDouble() > 0.0)
         return localResistance(zetaV.toDouble(), d, rho);
+
+    // Chamber components — use GasDynamics
+    if (typeId == "chamber.nozzle") {
+        double areaRatio = getProp(srcBlock, "areaRatio", 9.0);
+        double gamma     = getProp(srcBlock, "gamma", 1.2);
+        double chamberP  = getProp(srcBlock, "chamberPressure", 7.0e6);
+        // Compute exit Mach from area ratio (supersonic branch)
+        double exitMach = FluidDynamics::GasDynamics::machFromAreaRatio(areaRatio, gamma, false);
+        // Pressure ratio p_exit / p_chamber
+        double pr = FluidDynamics::GasDynamics::pressureRatio(
+            FluidDynamics::GasDynamics::speedCoefficient(exitMach, gamma), gamma);
+        double exitP = chamberP * pr;
+        // Effective resistance: Δp / ṁ → use choked mass flow as reference
+        double throatD = getProp(srcBlock, "throatDiameter", 0.05);
+        double throatA = M_PI * throatD * throatD / 4.0;
+        double molarMass = getProp(srcBlock, "molarMass", 22.3e-3);
+        double chamberT  = getProp(srcBlock, "chamberTemp", 3500.0);
+        double chokedMdot = FluidDynamics::GasDynamics::chokedMassFlow(
+            chamberP, chamberT, throatA, gamma, molarMass);
+        if (chokedMdot > 0.0) {
+            double dp = chamberP - exitP;
+            return dp / (chokedMdot * chokedMdot); // linearized resistance
+        }
+    }
+
+    if (typeId == "chamber.injector") {
+        double injArea = getProp(srcBlock, "injectionArea", 0.01);
+        double injVel  = getProp(srcBlock, "injectionVelocity", 30.0);
+        // Simple orifice model: Δp = 0.5 * ρ * v² / Cd², Cd ≈ 0.7
+        const double Cd = 0.7;
+        double dp = 0.5 * rho * injVel * injVel / (Cd * Cd);
+        double mdot = rho * injArea * injVel;
+        if (mdot > 0.0)
+            return dp / (mdot * mdot);
+    }
 
     // Crane Le/D method for fittings with known geometry
     if (isFittingType(typeId)) {
@@ -100,7 +164,7 @@ double computeEdgeResistance(BlockItem* srcBlock, PortItem*,
     // Pipes and straight runs
     const double L = getProp(srcBlock, "length", 0.3);
     if (typeId.startsWith("pipe.") || L > 0.001)
-        return pipeResistance(L, d, eps, rho, mu, massFlow);
+        return pipeResistance(L, d, eps, rho, mu, massFlow, useSST);
 
     // Fallback for components without explicit resistance
     return localResistance(0.5, d, rho); // reasonable default minor loss
@@ -110,7 +174,8 @@ double computeEdgeResistance(BlockItem* srcBlock, PortItem*,
 struct Graph;
 double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
                                    double massFlow, double rho, double mu,
-                                   const QSet<BlockItem*>& /*visited*/);
+                                   const QSet<BlockItem*>& /*visited*/,
+                                   double defaultRoughness = kDefaultRoughness);
 
 // ─── graph building ────────────────────────────────────────────
 
@@ -129,11 +194,14 @@ struct Graph {
     QHash<BlockItem*, QList<int>> inEdges;
     double fluidDensity = kDefaultDensity;
     double fluidViscosity = kDefaultViscosity;
+    double pipeRoughness = kDefaultRoughness;
+    bool useSST = true;
 };
 
 double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
                                    double massFlow, double rho, double mu,
-                                   const QSet<BlockItem*>& /*visited*/) {
+                                   const QSet<BlockItem*>& /*visited*/,
+                                   double defaultRoughness) {
     double totalK = 0.0;
     BlockItem* current = startBlock;
     QSet<BlockItem*> localVisited;
@@ -151,7 +219,8 @@ double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
         }
         if (ei < 0) break;
         const GraphEdge& ge = g.edges[ei];
-        double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, massFlow, rho, mu);
+        double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, massFlow, rho, mu,
+                                          g.useSST, defaultRoughness);
         if (K <= 0.0) K = 1e-12;
         totalK += K;
         localVisited.insert(current);
@@ -161,13 +230,16 @@ double computeDownstreamResistance(const Graph& g, BlockItem* startBlock,
     return (totalK > 0.0) ? totalK : 1e-12;
 }
 
-Graph buildGraph(BlockScene* scene, double density = -1.0, double viscosity = -1.0) {
+Graph buildGraph(BlockScene* scene, double density = -1.0, double viscosity = -1.0,
+                 bool useSST = true, double roughness = -1.0) {
     Graph g;
     g.nodes = scene->allBlocks();
+    g.useSST = useSST;
 
     // Global overrides from SolverSettings (if provided)
     if (density > 0.0) g.fluidDensity = density;
     if (viscosity > 0.0) g.fluidViscosity = viscosity;
+    if (roughness > 0.0) g.pipeRoughness = roughness;
 
     // Extract fluid properties from blocks that define them (per-block overrides)
     for (auto* b : g.nodes) {
@@ -223,6 +295,53 @@ QList<BlockItem*> findInlets(const Graph& g) {
 }
 
 // Build NodeState list and compute total pressure drop
+// Compute thrust results from a nozzle block's properties and mass flow
+ThrustAnalysis::ThrustResult computeNozzleThrust(BlockItem* nozzleBlock, double massFlow)
+{
+    ThrustAnalysis::ThrustResult r{};
+    if (!nozzleBlock || massFlow <= 0.0) return r;
+
+    double chamberP  = getProp(nozzleBlock, "chamberPressure", 7.0e6);
+    double throatD   = getProp(nozzleBlock, "throatDiameter", 0.05);
+    double exitD     = getProp(nozzleBlock, "exitDiameter", 0.15);
+    double areaRatio = getProp(nozzleBlock, "areaRatio", 9.0);
+    double gamma     = getProp(nozzleBlock, "gamma", 1.2);
+
+    double throatA = M_PI * throatD * throatD / 4.0;
+    double exitA   = M_PI * exitD * exitD / 4.0;
+    if (throatA <= 0.0 || exitA <= 0.0) return r;
+
+    // Compute exit pressure from area ratio and chamber pressure (supersonic)
+    double exitMach = FluidDynamics::GasDynamics::machFromAreaRatio(areaRatio, true, gamma);
+    double pr = FluidDynamics::GasDynamics::pressureRatio(
+        FluidDynamics::GasDynamics::speedCoefficient(exitMach, gamma), gamma);
+    double exitP = chamberP * pr;
+
+    ThrustAnalysis::ThrustInputs in;
+    in.chamberPressure_Pa = chamberP;
+    in.exitPressure_Pa    = exitP;
+    in.ambientPressure_Pa = 101325.0;  // sea level
+    in.exitArea_m2        = exitA;
+    in.throatArea_m2      = throatA;
+    in.massFlow_kgPerS    = massFlow;
+    in.gamma              = gamma;
+
+    r = ThrustAnalysis::calculateThrust(in);
+
+    // Compute nozzle efficiency using ideal Cf from GasDynamics
+    double Cf_ideal = FluidDynamics::GasDynamics::thrustCoefficient(
+        chamberP, exitP, in.ambientPressure_Pa, exitA, throatA, gamma);
+    r.thrustCoefficient = Cf_ideal; // use GasDynamics value (more precise)
+    double Cf_actual = r.thrustCoefficient;
+    r.thrust_N = Cf_actual * chamberP * throatA;
+    r.momentumThrust_N = r.thrust_N - (exitP - in.ambientPressure_Pa) * exitA;
+    r.pressureThrust_N = (exitP - in.ambientPressure_Pa) * exitA;
+    double g0 = 9.80665;
+    r.specificImpulse_s = r.thrust_N / (massFlow * g0);
+
+    return r;
+}
+
 void finalizeSolution(NetworkSolution& sol,
                       const Graph& g,
                       const QHash<BlockItem*, double>& pressure,
@@ -248,13 +367,85 @@ void finalizeSolution(NetworkSolution& sol,
     }
     sol.totalPressureDrop = inletPressurePa - pMin;
     sol.converged = true;
+
+    // Compute thrust if network contains a nozzle
+    for (auto* b : g.nodes) {
+        if (b->typeId() == "chamber.nozzle" && inflow.value(b) > 0.0) {
+            sol.thrustResult = computeNozzleThrust(b, inflow.value(b));
+            sol.hasThrustResults = true;
+            break;
+        }
+    }
+}
+
+// Cavitation / NPSH risk check.
+// Computes approximate vapor pressure for the working fluid at room temperature
+// and flags any node where local pressure drops below NPSH safety margin.
+QString checkCavitationRisk(const NetworkSolution& sol, FluidType fType)
+{
+    // Representative temperature — room temp unless propellant is cryogenic
+    double TK = 293.15; // 20°C default
+    double vaporPressurePa = 0.0;
+    QString fluidName;
+
+    // Use Wagner equation coefficients for approximate vapor pressure
+    namespace PP = PropellantProperties;
+    switch (fType) {
+    case FluidType::LOX:
+        TK = 90.0; // LOX boiling point ~90 K
+        vaporPressurePa = PP::wagnerVaporPressure(TK, PP::wagnerLOX());
+        fluidName = QStringLiteral("LOX");
+        break;
+    case FluidType::LH2:
+        TK = 20.3;
+        vaporPressurePa = PP::wagnerVaporPressure(TK, PP::wagnerLH2());
+        fluidName = QStringLiteral("LH2");
+        break;
+    case FluidType::CH4:
+        TK = 111.6;
+        vaporPressurePa = PP::wagnerVaporPressure(TK, PP::wagnerMethane());
+        fluidName = QStringLiteral("Methane");
+        break;
+    case FluidType::RP1:
+        vaporPressurePa = 1333.0; // ~10 Torr at room temp
+        fluidName = QStringLiteral("RP-1");
+        break;
+    case FluidType::Water:
+    default:
+        vaporPressurePa = 2338.0; // water at 20°C
+        fluidName = QStringLiteral("Water");
+        break;
+    }
+
+    // NPSH margin: require local pressure > vapor pressure × safety factor
+    constexpr double npshMargin = 1.5;
+    const double minSafePressure = vaporPressurePa * npshMargin;
+
+    QStringList warnings;
+    for (const auto& node : sol.nodes) {
+        if (node.pressure > 0.0 && node.pressure < minSafePressure) {
+            warnings.append(QStringLiteral("  ⚠ %1: p=%2 kPa < NPSH margin %3 kPa (%4)")
+                .arg(node.blockLabel)
+                .arg(node.pressure / 1e3, 0, 'f', 1)
+                .arg(minSafePressure / 1e3, 0, 'f', 1)
+                .arg(fluidName));
+        }
+    }
+
+    if (!warnings.isEmpty()) {
+        return QStringLiteral("[Cavitation Risk] %1 nodes below %2 vapor pressure margin:\n%3")
+            .arg(warnings.size()).arg(fluidName).arg(warnings.join('\n'));
+    }
+    return QString();
 }
 
 // ─── BFS forward-propagation solver ────────────────────────────
 
 NetworkSolution solveGraph(const Graph& g,
                            double inletPressurePa,
-                           double inletMassFlowKgPerS) {
+                           double inletMassFlowKgPerS,
+                           int /*maxSplits*/ = 3,
+                           double relaxation = 1.0) {
     NetworkSolution sol;
     const QList<BlockItem*> inlets = findInlets(g);
 
@@ -296,25 +487,31 @@ NetworkSolution solveGraph(const Graph& g,
 
         const int nOut = outEdgeIndices.size();
 
-        // Iterative impedance-based flow distribution (2-3 passes)
-        // For each branch, compute total downstream resistance, then split by 1/sqrt(K_total)
-        QList<double> flows(nOut, drivingFlow / nOut);
-        QList<double> branchK(nOut, 0.0);
-        for (int iter = 0; iter < 3; ++iter) {
+        // Single-pass flow distribution: Q_i ∝ 1/√K_i  (correct for turbulent parallel branches)
+        QList<double> flows(nOut, 0.0);
+        {
             double sumInvSqrtK = 0.0;
+            QList<double> branchK(nOut, 0.0);
+            double initFlow = drivingFlow / std::max(nOut, 1);
             for (int i = 0; i < nOut; ++i) {
                 const GraphEdge& ge = g.edges[outEdgeIndices[i]];
-                double K0 = computeEdgeResistance(ge.srcBlock, ge.srcPort, flows[i],
-                                                  g.fluidDensity, g.fluidViscosity);
-                double Kdown = computeDownstreamResistance(g, ge.dstBlock, flows[i],
-                                                           g.fluidDensity, g.fluidViscosity, visited);
+                double K0 = computeEdgeResistance(ge.srcBlock, ge.srcPort, initFlow,
+                                                  g.fluidDensity, g.fluidViscosity,
+                                                  g.useSST, g.pipeRoughness);
+                double Kdown = computeDownstreamResistance(g, ge.dstBlock, initFlow,
+                                                           g.fluidDensity, g.fluidViscosity,
+                                                           visited, g.pipeRoughness);
                 branchK[i] = K0 + Kdown;
                 if (branchK[i] <= 0.0) branchK[i] = 1e-12;
                 sumInvSqrtK += 1.0 / std::sqrt(branchK[i]);
             }
-            if (sumInvSqrtK <= 0.0) break;
-            for (int i = 0; i < nOut; ++i)
-                flows[i] = drivingFlow * (1.0 / std::sqrt(branchK[i])) / sumInvSqrtK;
+            if (sumInvSqrtK > 0.0) {
+                for (int i = 0; i < nOut; ++i)
+                    flows[i] = drivingFlow * (1.0 / std::sqrt(branchK[i])) / sumInvSqrtK;
+            } else {
+                for (int i = 0; i < nOut; ++i)
+                    flows[i] = drivingFlow / nOut;
+            }
         }
 
         for (int i = 0; i < nOut; ++i) {
@@ -322,12 +519,17 @@ NetworkSolution solveGraph(const Graph& g,
             auto* dst = ge.dstBlock;
             double flowPerEdge = flows[i];
             double K = computeEdgeResistance(ge.srcBlock, ge.srcPort, flowPerEdge,
-                                             g.fluidDensity, g.fluidViscosity);
+                                             g.fluidDensity, g.fluidViscosity,
+                                             g.useSST, g.pipeRoughness);
             double dp = K * flowPerEdge * flowPerEdge;
             double pDst = pressure[block] - dp;
 
-            if (!visited.contains(dst) || pressure[dst] < pDst)
+            if (!visited.contains(dst)) {
                 pressure[dst] = pDst;
+            } else {
+                double oldP = pressure[dst];
+                pressure[dst] = relaxation * std::max(oldP, pDst) + (1.0 - relaxation) * oldP;
+            }
             inflow[dst] += flowPerEdge;
 
             EdgeState es;
@@ -647,7 +849,8 @@ NetworkSolution solveMatrix(const Graph& g,
             Kvals[j] = computeEdgeResistance(g.edges[j].srcBlock,
                                               g.edges[j].srcPort,
                                               std::abs(Qvals[j]) + 0.001,
-                                              g.fluidDensity, g.fluidViscosity);
+                                              g.fluidDensity, g.fluidViscosity,
+                                              g.useSST, g.pipeRoughness);
         }
 
         // Propagate pressures forward from inlets
@@ -831,9 +1034,17 @@ NetworkSolution solveNetworkHardyCross(BlockScene* scene,
         sol.message = QStringLiteral("Invalid or empty network.");
         return sol;
     }
-    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
-    return solveHardyCross(g, inletPressurePa, inletMassFlowKgPerS,
-                           settings.hardyCrossMaxIter, settings.hardyCrossTolerance);
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity,
+                         settings.useSSTTurbulence, settings.pipeRoughness);
+    auto sol = solveHardyCross(g, inletPressurePa, inletMassFlowKgPerS,
+                               settings.hardyCrossMaxIter, settings.hardyCrossTolerance);
+    // Cavitation/NPSH risk check
+    if (sol.converged) {
+        QString cavWarn = checkCavitationRisk(sol, settings.fluidType);
+        if (!cavWarn.isEmpty())
+            sol.message += QStringLiteral("\n") + cavWarn;
+    }
+    return sol;
 }
 
 NetworkSolution solveNetworkMatrix(BlockScene* scene,
@@ -845,9 +1056,17 @@ NetworkSolution solveNetworkMatrix(BlockScene* scene,
         sol.message = QStringLiteral("Invalid or empty network for matrix solver.");
         return sol;
     }
-    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
-    return solveMatrix(g, inletPressurePa, inletMassFlowKgPerS,
-                       settings.matrixSolverMaxIter, settings.matrixSolverTolerance);
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity,
+                         settings.useSSTTurbulence, settings.pipeRoughness);
+    auto sol = solveMatrix(g, inletPressurePa, inletMassFlowKgPerS,
+                           settings.matrixSolverMaxIter, settings.matrixSolverTolerance);
+    // Cavitation/NPSH risk check
+    if (sol.converged) {
+        QString cavWarn = checkCavitationRisk(sol, settings.fluidType);
+        if (!cavWarn.isEmpty())
+            sol.message += QStringLiteral("\n") + cavWarn;
+    }
+    return sol;
 }
 
 NetworkSolution solveNetworkAuto(BlockScene* scene,
@@ -859,13 +1078,23 @@ NetworkSolution solveNetworkAuto(BlockScene* scene,
         sol.message = QStringLiteral("Invalid or empty network.");
         return sol;
     }
-    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity);
+    Graph g = buildGraph(scene, settings.fluidDensity, settings.fluidViscosity,
+                         settings.useSSTTurbulence, settings.pipeRoughness);
     QList<EdgeIdxList> loops = detectLoops(g);
 
+    NetworkSolution sol;
     if (loops.isEmpty()) {
-        return solveGraph(g, inletPressurePa, inletMassFlowKgPerS);
+        sol = solveGraph(g, inletPressurePa, inletMassFlowKgPerS,
+                        settings.maxIterations, settings.relaxationFactor);
     } else {
-        return solveHardyCross(g, inletPressurePa, inletMassFlowKgPerS,
-                               settings.hardyCrossMaxIter, settings.hardyCrossTolerance);
+        sol = solveHardyCross(g, inletPressurePa, inletMassFlowKgPerS,
+                             settings.hardyCrossMaxIter, settings.hardyCrossTolerance);
     }
+    // Cavitation/NPSH risk check
+    if (sol.converged) {
+        QString cavWarn = checkCavitationRisk(sol, settings.fluidType);
+        if (!cavWarn.isEmpty())
+            sol.message += QStringLiteral("\n") + cavWarn;
+    }
+    return sol;
 }

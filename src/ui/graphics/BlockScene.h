@@ -29,6 +29,7 @@ public:
     // Connection management
     ConnectionItem* addConnection(PortItem* source, PortItem* dest);
     void removeConnection(ConnectionItem* conn);
+    void deleteSelectedConnections();
     QList<ConnectionItem*> allConnections() const;
     bool canConnect(PortItem* source, PortItem* dest) const;
 
@@ -73,6 +74,7 @@ private:
     // Connection drawing state machine
     bool m_drawingConnection = false;
     PortItem* m_connectionSource = nullptr;
+    ConnectionItem* m_reconnectConnection = nullptr; // existing conn being reconnected
     QGraphicsPathItem* m_tempConnection = nullptr;
 
     bool m_snapEnabled = true;

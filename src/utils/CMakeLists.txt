@@ -23,6 +23,14 @@ add_library(lrep_utils STATIC
     ThrustAnalysis.h
     GridRefinement.h
     ExpressionEngine.h
+    PipeScheduleDatabase.h
+    PipeScheduleDatabase.cpp
+    ReportGenerator.h
+    ReportGenerator.cpp
+    DesignRules.h
+    DesignRules.cpp
+    BomGenerator.h
+    BomGenerator.cpp
 )
 
 target_include_directories(lrep_utils PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

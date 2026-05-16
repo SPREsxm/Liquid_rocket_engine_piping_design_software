@@ -10,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Find Qt 6 (relax minimum to 6.2 for wider compatibility; 6.8 recommended)
-find_package(Qt6 6.2 QUIET COMPONENTS Widgets Svg)
+find_package(Qt6 6.2 QUIET COMPONENTS Widgets Svg PrintSupport)
 if(NOT Qt6_FOUND)
     message(WARNING "Qt6 not found. Build will be configured but cannot compile GUI code.")
     message(WARNING "Install Qt 6.x and set CMAKE_PREFIX_PATH to the Qt install directory.")

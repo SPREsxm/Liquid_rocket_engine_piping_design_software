@@ -31,6 +31,7 @@ void ActionManager::createAll()
     add(ActionId::Save,   tr("&Save"),   QKeySequence::Save,   tr("Save the current project"));
     add(ActionId::SaveAs, tr("Save &As..."), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), tr("Save project to a new file"));
     add(ActionId::Export_,tr("&Export..."), QKeySequence(),    tr("Export to external format"));
+    add(ActionId::Print,  tr("&Print..."),  QKeySequence::Print, tr("Print the schematic diagram"));
 
     // Edit
     add(ActionId::Undo, tr("&Undo"), QKeySequence::Undo, tr("Undo last action"));
@@ -57,6 +58,7 @@ void ActionManager::createAll()
     // Tools
     add(ActionId::RunAnalysis, tr("&Run Analysis"), QKeySequence(Qt::Key_F5), tr("Run piping network analysis"));
     add(ActionId::Validate,    tr("&Validate"),    QKeySequence(Qt::CTRL | Qt::Key_F7), tr("Validate the piping network"));
+    add(ActionId::GenerateBom, tr("Generate &BOM..."), QKeySequence(), tr("Generate bill of materials"));
     add(ActionId::Preferences, tr("&Preferences..."), QKeySequence(), tr("Open preferences"));
 
     // Help

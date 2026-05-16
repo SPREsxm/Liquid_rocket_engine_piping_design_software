@@ -7,6 +7,7 @@
 #include <QString>
 
 class BlockItem;
+class ConnectionItem;
 
 class PortItem : public QGraphicsEllipseItem {
 public:
@@ -24,8 +25,9 @@ public:
     BlockItem* parentBlock() const { return m_parentBlock; }
     QPointF centerInScene() const;
 
-    bool isConnected() const { return m_isConnected; }
-    void setConnected(bool connected);
+    bool isConnected() const { return m_connection != nullptr; }
+    void setConnection(ConnectionItem* conn);
+    ConnectionItem* connection() const { return m_connection; }
 
     void setHighlighted(bool on);
 
@@ -40,6 +42,6 @@ private:
     PortDirection m_direction;
     PortDataType m_dataType;
     BlockItem* m_parentBlock;
-    bool m_isConnected = false;
+    ConnectionItem* m_connection = nullptr;
     bool m_highlighted = false;
 };

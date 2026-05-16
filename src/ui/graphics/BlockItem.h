@@ -42,6 +42,10 @@ public:
 
     void setPressure(double pressure);
 
+    // Analysis tooltip data (populated by MainWindow after solve)
+    void setAnalysisTooltip(double pressure, double inletFlow, double outletFlow);
+    bool hasAnalysisData() const { return m_hasAnalysisData; }
+
     ComponentDescriptor descriptor() const { return m_descriptor; }
     ComponentInstance toInstance() const;
 
@@ -59,6 +63,7 @@ protected:
     void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
 
 private:
     void createPorts();
@@ -72,4 +77,11 @@ private:
     QList<PortItem*> m_outputPorts;
     QString m_customLabel;
     double m_pressure = -1.0; // negative = not set / hidden
+
+    // Tooltip / analysis data
+    bool m_hasAnalysisData = false;
+    double m_tooltipPressure = -1.0;
+    double m_tooltipInletFlow = 0.0;
+    double m_tooltipOutletFlow = 0.0;
+    QString makeTooltipText() const;
 };

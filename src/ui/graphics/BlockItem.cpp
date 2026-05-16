@@ -13,6 +13,7 @@
 #include <QGraphicsScene>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsSceneHoverEvent>
+#include <QToolTip>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsDropShadowEffect>
 
@@ -177,8 +178,19 @@ void BlockItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidge
     painter->setBrush(QColor(0, 0, 0, 45));
     painter->drawRoundedRect(bodyRect.translated(3, 3), r, r);
 
-    // Body
-    painter->setBrush(BlockAppearance::bodyColor());
+    // Body — pressure gradient if analysis data available
+    if (m_pressure >= 0.0) {
+        double ratio = qBound(0.0, m_pressure / 20.0e6, 1.0);  // 0→20 MPa maps to blue→red
+        QColor pc(static_cast<int>(21 + ratio * (198 - 21)),
+                  static_cast<int>(101 + (1.0 - ratio) * (101 - 40)),
+                  static_cast<int>(192 + (1.0 - ratio) * (192 - 40)));
+        QLinearGradient grad(bodyRect.topLeft(), bodyRect.bottomRight());
+        grad.setColorAt(0.0, pc.lighter(130));
+        grad.setColorAt(1.0, pc);
+        painter->setBrush(grad);
+    } else {
+        painter->setBrush(BlockAppearance::bodyColor());
+    }
     painter->drawRoundedRect(bodyRect, r, r);
 
     // Header
@@ -284,9 +296,36 @@ void BlockItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* event)
     }
 }
 
-void BlockItem::hoverEnterEvent(QGraphicsSceneHoverEvent*)
+void BlockItem::setAnalysisTooltip(double pressure, double inletFlow, double outletFlow)
 {
+    m_hasAnalysisData = true;
+    m_tooltipPressure = pressure;
+    m_tooltipInletFlow = inletFlow;
+    m_tooltipOutletFlow = outletFlow;
+    setAcceptHoverEvents(true);
+}
+
+QString BlockItem::makeTooltipText() const
+{
+    if (!m_hasAnalysisData) return {};
+    return QStringLiteral("Type: %1\nPressure: %2 MPa\nInlet Flow: %3 kg/s\nOutlet Flow: %4 kg/s")
+        .arg(m_descriptor.displayName)
+        .arg(m_tooltipPressure / 1.0e6, 0, 'f', 4)
+        .arg(m_tooltipInletFlow, 0, 'f', 4)
+        .arg(m_tooltipOutletFlow, 0, 'f', 4);
+}
+
+void BlockItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event)
+{
+    if (m_hasAnalysisData)
+        QToolTip::showText(event->screenPos(), makeTooltipText());
     update();
+}
+
+void BlockItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
+{
+    if (m_hasAnalysisData)
+        QToolTip::showText(event->screenPos(), makeTooltipText());
 }
 
 void BlockItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*)

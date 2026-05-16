@@ -50,17 +50,12 @@ inline ThrustResult calculateThrust(const ThrustInputs& in)
     // Exit Mach number from pressure ratio (isentropic)
     double pr = in.exitPressure_Pa / std::max(in.chamberPressure_Pa, 1e-10);
     double pr_exp = std::pow(pr, gm1 / in.gamma);
-    double Me_sq = (2.0 / gm1) * (pr_exp - 1.0);
-    double Me = std::sqrt(std::max(Me_sq, 0.0));
-
-    // Exit velocity: v_e = M_e·sqrt(γ·R·T_c / (1 + (γ-1)/2·M_e²))
-    // Use characteristic velocity c* = pc·At / ṁ
-    double cstar = in.chamberPressure_Pa * in.throatArea_m2 / in.massFlow_kgPerS;
+    // Me_sq and cstar computed for reference; thrust uses Cf formulation directly
 
     // Thrust coefficient
     double Cf_momentum = std::sqrt(2.0 * in.gamma * in.gamma / gm1
                          * std::pow(2.0 / gp1, gp1 / gm1)
-                         * (1.0 - std::pow(pr, gm1 / in.gamma)));
+                         * (1.0 - pr_exp));
     double Cf_pressure = (in.exitPressure_Pa - in.ambientPressure_Pa)
                        / in.chamberPressure_Pa * in.exitArea_m2 / in.throatArea_m2;
     r.thrustCoefficient = Cf_momentum + Cf_pressure;
@@ -95,7 +90,7 @@ inline ThrustResult calculateThrust(const ThrustInputs& in)
 }
 
 // Thrust error from chamber pressure uncertainty
-inline double thrustErrorFromChamberPressure(double pc, double pcUncertainty,
+inline double thrustErrorFromChamberPressure(double /*pc*/, double pcUncertainty,
                                               double At, double Cf)
 {
     double dF_dpc = At * Cf;
@@ -114,7 +109,7 @@ inline double thrustErrorFromAreaRatio(double Ae, double At,
 }
 
 // Nozzle efficiency from thrust coefficient
-inline double nozzleEfficiency(double Cf_actual, double Cf_ideal, double gamma)
+inline double nozzleEfficiency(double Cf_actual, double Cf_ideal, double /*gamma*/)
 {
     if (Cf_ideal <= 0.0) return 0.0;
     return Cf_actual / Cf_ideal;

@@ -79,6 +79,13 @@ struct SolverSettings {
     int gridBaseNodes = 50;
     double fluidDensity = 1141.0;    // kg/m^3  (LOX default)
     double fluidViscosity = 1.96e-4; // Pa·s    (LOX default)
+    bool useSSTTurbulence = true;    // SST k-ω vs Colebrook-White
+    FluidType fluidType = FluidType::LOX; // working fluid for NPSH/cavitation checks
+
+    // Pipe material properties (overridden by per-block properties when available)
+    double pipeRoughness = 4.5e-5;     // m  (commercial steel ~45 μm)
+    double pipeYoungsModulus = 2.0e11; // Pa (stainless steel ~200 GPa)
+    double pipeWallThickness = 0.001;  // m  (1 mm typical)
 
     // Read solver settings from QSettings, using struct defaults as fallbacks.
     static SolverSettings fromQSettings();

@@ -13,6 +13,7 @@ enum class ActionId {
     Save,
     SaveAs,
     Export_,
+    Print,
     // Edit
     Undo,
     Redo,
@@ -31,6 +32,7 @@ enum class ActionId {
     // Tools
     RunAnalysis,
     Validate,
+    GenerateBom,
     Preferences,
     // Help
     About,

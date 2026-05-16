@@ -97,3 +97,41 @@ TEST_CASE("BlockScene blockByUuid finds correct block", "[BlockScene]") {
     REQUIRE(found != nullptr);
     REQUIRE(found->typeId() == "pipe.straight");
 }
+
+// ─── Tooltip data tests (Phase 21 B3) ─────────────────────────
+
+TEST_CASE("BlockItem analysis tooltip stores data", "[BlockItem][Tooltip]") {
+    auto desc = ComponentDescriptor::createStraightPipe();
+    ComponentInstance inst;
+    inst.uuid = QUuid::createUuid();
+    inst.typeId = desc.typeId;
+    inst.position = QPointF(0, 0);
+    BlockItem block(inst, desc);
+
+    REQUIRE_FALSE(block.hasAnalysisData());
+    block.setAnalysisTooltip(5.0e6, 12.5, 12.5);
+    REQUIRE(block.hasAnalysisData());
+}
+
+TEST_CASE("BlockItem no tooltip data by default", "[BlockItem][Tooltip]") {
+    auto desc = ComponentDescriptor::createStraightPipe();
+    ComponentInstance inst;
+    inst.uuid = QUuid::createUuid();
+    inst.typeId = desc.typeId;
+    inst.position = QPointF(0, 0);
+    BlockItem block(inst, desc);
+
+    REQUIRE_FALSE(block.hasAnalysisData());
+}
+
+TEST_CASE("ConnectionItem flow data sets tooltip info", "[ConnectionItem][Tooltip]") {
+    auto& factory = ComponentFactory::instance();
+    BlockScene scene(&factory);
+    auto* src = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(0, 0));
+    auto* dst = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(200, 0));
+    auto* conn = scene.addConnection(src->outputPorts().first(), dst->inputPorts().first());
+    REQUIRE(conn != nullptr);
+
+    REQUIRE_NOTHROW(conn->setFlowData(8.0, 12.0));
+    REQUIRE_NOTHROW(conn->setAnalysisTooltip(1500.0, 8.0));
+}

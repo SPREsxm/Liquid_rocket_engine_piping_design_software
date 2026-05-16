@@ -9,6 +9,9 @@ class QAction;
 class QMenu;
 class QDoubleSpinBox;
 class QComboBox;
+class QLineEdit;
+class QSortFilterProxyModel;
+class QTimer;
 class ActionManager;
 class BlockScene;
 class BlockView;
@@ -17,6 +20,7 @@ class LibraryTreeView;
 class LibraryTreeModel;
 class PropertyEditor;
 class SolverResultsPanel;
+class LegendWidget;
 class QUndoStack;
 
 class MainWindow : public QMainWindow {
@@ -44,6 +48,7 @@ private:
     void onSave();
     void onSaveAs();
     void onExport();
+    void onPrint();
 
     // View actions
     void onZoomIn();
@@ -53,6 +58,7 @@ private:
     // Tools
     void onRunAnalysis();
     void onValidate();
+    void onGenerateBom();
     void onPreferences();
 
     // Plugin & solver
@@ -82,7 +88,9 @@ private:
     QDockWidget* m_libraryDock    = nullptr;
     QDockWidget* m_propertyDock   = nullptr;
     QDockWidget* m_messageDock    = nullptr;
+    QDockWidget* m_legendDock     = nullptr;
     SolverResultsPanel* m_resultsDock = nullptr;
+    LegendWidget* m_legendWidget  = nullptr;
 
     // Status bar
     QLabel* m_statusLabel = nullptr;
@@ -91,6 +99,7 @@ private:
     // Boundary condition inputs
     QDoubleSpinBox* m_inletPressureSpin = nullptr;
     QDoubleSpinBox* m_inletFlowSpin = nullptr;
+    QDoubleSpinBox* m_maxPressureDropSpin = nullptr;
     QComboBox* m_fluidTypeCombo = nullptr;
 
     // Recent files
@@ -110,6 +119,8 @@ private:
     // Library
     LibraryTreeModel* m_libraryModel = nullptr;
     LibraryTreeView*  m_libraryView  = nullptr;
+    QLineEdit* m_librarySearchBox = nullptr;
+    QSortFilterProxyModel* m_libraryFilterProxy = nullptr;
 
     // Properties
     PropertyEditor* m_propertyEditor = nullptr;
@@ -124,4 +135,11 @@ private:
     void setDirty(bool dirty);
     bool maybeSave();
     void appendMessage(const QString& message);
+
+    // Autosave
+    QTimer* m_autosaveTimer = nullptr;
+    void onAutosave();
+    void checkAutosaveRecovery();
+    QString autosavePath() const;
+    void removeAutosaveFile();
 };

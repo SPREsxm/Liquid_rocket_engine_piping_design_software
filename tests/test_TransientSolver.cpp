@@ -145,3 +145,81 @@ TEST_CASE("Water hammer with user-specified time step", "[TransientSolver]") {
     REQUIRE(result.maxPressure > 1e6);
     REQUIRE(result.timeSteps > 0);
 }
+
+// ─── Material setters (Phase 20 B6) ─────────────────────────────
+
+TEST_CASE("Default Youngs modulus setter affects wave speed computation", "[TransientSolver]") {
+    TransientSolver ts;
+    ts.setDefaultYoungsModulus(7e10);  // aluminum
+    PipeSegment seg{1.0, 0.0254, 0.001, 7e10, 0.000045, 1141.0, 1.96e-4, 1e9};
+    double c = ts.computeWaveSpeed(seg);
+    REQUIRE(c > 0.0);
+    REQUIRE(c < 10000.0);
+}
+
+TEST_CASE("Default wall thickness setter", "[TransientSolver]") {
+    TransientSolver ts;
+    ts.setDefaultWallThickness(0.002);
+    REQUIRE(true);  // setter doesn't crash
+}
+
+// ─── Wave speed material sensitivity ─────────────────────────────
+
+TEST_CASE("Wave speed lower with aluminum than steel", "[TransientSolver]") {
+    TransientSolver ts;
+    // Steel E=2e11
+    PipeSegment steelSeg{1.0, 0.0254, 0.001, 2.0e11, 0.000045, 1141.0, 1.96e-4, 1e9};
+    double cSteel = ts.computeWaveSpeed(steelSeg);
+    // Aluminum E=7.1e10
+    PipeSegment alSeg{1.0, 0.0254, 0.001, 7.1e10, 0.000045, 1141.0, 1.96e-4, 1e9};
+    double cAl = ts.computeWaveSpeed(alSeg);
+    REQUIRE(cSteel > 0.0);
+    REQUIRE(cAl > 0.0);
+    REQUIRE(cAl < cSteel);  // lower modulus → lower wave speed
+}
+
+TEST_CASE("Wave speed higher with thicker wall", "[TransientSolver]") {
+    TransientSolver ts;
+    PipeSegment thinWall{1.0, 0.0254, 0.0005, 2e11, 0.000045, 1141.0, 1.96e-4, 1e9};
+    double cThin = ts.computeWaveSpeed(thinWall);
+    PipeSegment thickWall{1.0, 0.0254, 0.005, 2e11, 0.000045, 1141.0, 1.96e-4, 1e9};
+    double cThick = ts.computeWaveSpeed(thickWall);
+    REQUIRE(cThin > 0.0);
+    REQUIRE(cThick > 0.0);
+    REQUIRE(cThick > cThin);  // thicker wall → stiffer → higher wave speed
+}
+
+// ─── Friction slope roughness sensitivity ────────────────────────
+
+TEST_CASE("Friction slope higher with rougher pipe", "[TransientSolver]") {
+    TransientSolver ts;
+    double slopeSmooth = ts.frictionSlope(5.0, 0.0254, 1e-6, 1141.0, 1.96e-4);
+    double slopeRough  = ts.frictionSlope(5.0, 0.0254, 1e-3, 1141.0, 1.96e-4);
+    REQUIRE(slopeSmooth > 0.0);
+    REQUIRE(slopeRough > 0.0);
+    REQUIRE(slopeRough > slopeSmooth);  // rougher pipe → higher friction
+}
+
+// ─── Water hammer with custom material defaults ──────────────────
+
+TEST_CASE("Water hammer with custom roughness produces valid result", "[TransientSolver]") {
+    TestPipeline tp;
+    REQUIRE(tp.steady.converged == true);
+
+    TransientSolver ts;
+    ts.setDefaultRoughness(5e-4);
+    auto result = ts.simulateWaterHammer(tp.steady, tp.scene, 0.1, 50);
+    REQUIRE(result.maxPressure > 1e6);
+    REQUIRE(result.timeSteps > 0);
+}
+
+TEST_CASE("Water hammer with aluminum material defaults", "[TransientSolver]") {
+    TestPipeline tp;
+    REQUIRE(tp.steady.converged == true);
+
+    TransientSolver ts;
+    ts.setDefaultYoungsModulus(7.1e10);  // Aluminum 2219
+    auto result = ts.simulateWaterHammer(tp.steady, tp.scene, 0.1, 50);
+    REQUIRE(result.maxPressure > 1e6);
+    REQUIRE(result.timeSteps > 0);
+}

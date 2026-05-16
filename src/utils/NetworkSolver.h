@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Types.h"
+#include "utils/ThrustAnalysis.h"
 
 #include <QList>
 #include <QString>
@@ -36,6 +37,23 @@ struct NetworkSolution {
     double totalPressureDrop = 0.0;
     bool converged = false;
     QString message;
+
+    // Thrust chamber results (populated when network contains chamber.nozzle)
+    bool hasThrustResults = false;
+    ThrustAnalysis::ThrustResult thrustResult;
+
+    double minPressure() const {
+        double p = 1e30;
+        for (const auto& n : nodes)
+            if (n.pressure < p) p = n.pressure;
+        return p < 1e29 ? p : 0.0;
+    }
+    double maxPressure() const {
+        double p = 0.0;
+        for (const auto& n : nodes)
+            if (n.pressure > p) p = n.pressure;
+        return p;
+    }
 };
 
 // BFS forward-propagation solver (existing)

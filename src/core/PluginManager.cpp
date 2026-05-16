@@ -27,7 +27,7 @@ int PluginManager::discoverPlugins(const QString& pluginDir) {
 }
 
 IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
-    auto lib = std::make_unique<QLibrary>(dllPath);
+    auto lib = std::make_shared<QLibrary>(dllPath);
     if (!lib->load()) {
         qWarning() << "Failed to load plugin:" << dllPath << lib->errorString();
         return nullptr;
@@ -58,7 +58,7 @@ IPlugin* PluginManager::loadPlugin(const QString& dllPath) {
     }
 
     PluginEntry entry;
-    entry.library = lib.release();  // transfer ownership
+    entry.library = lib;  // shared_ptr, safe to copy
     entry.instance = plugin;
     entry.destroy = destroyFn;
 
@@ -77,7 +77,6 @@ bool PluginManager::unloadPlugin(const QString& pluginId) {
     it->instance->shutdown();
     it->destroy(it->instance);
     it->library->unload();
-    delete it->library;
     m_plugins.erase(it);
     return true;
 }

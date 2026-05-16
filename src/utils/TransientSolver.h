@@ -53,6 +53,11 @@ public:
     void setTargetCourant(double cfl) { m_targetCFL = cfl; }
     double targetCourant() const { return m_targetCFL; }
 
+    // Pipe material defaults (overridden by per-block properties when available)
+    void setDefaultRoughness(double r)     { m_defaultRoughness = r; }
+    void setDefaultYoungsModulus(double e) { m_defaultYoungsModulus = e; }
+    void setDefaultWallThickness(double t) { m_defaultWallThickness = t; }
+
     double computeWaveSpeed(const PipeSegment &seg) const;
     double frictionSlope(double velocity, double diameter,
                          double roughness, double density, double viscosity) const;
@@ -84,4 +89,7 @@ private:
                                       double maxPressureTime) const;
 
     double m_targetCFL = 0.9;
+    double m_defaultRoughness = 4.5e-5;
+    double m_defaultYoungsModulus = 2.0e11;
+    double m_defaultWallThickness = -1.0; // -1 = auto (d/20)
 };

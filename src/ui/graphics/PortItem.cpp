@@ -31,9 +31,9 @@ QPointF PortItem::centerInScene() const
     return mapToScene(0, 0);
 }
 
-void PortItem::setConnected(bool connected)
+void PortItem::setConnection(ConnectionItem* conn)
 {
-    m_isConnected = connected;
+    m_connection = conn;
 }
 
 void PortItem::setHighlighted(bool on)
@@ -65,7 +65,7 @@ void PortItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
     }
     QColor border = BlockAppearance::portBorderColor();
 
-    if (m_highlighted || m_isConnected) {
+    if (m_highlighted || m_connection) {
         const qreal r = BlockAppearance::PORT_HOVER_RADIUS;
         painter->setPen(QPen(BlockAppearance::portHighlightColor(), 2.5));
         painter->setBrush(BlockAppearance::portHighlightColor().lighter(160));

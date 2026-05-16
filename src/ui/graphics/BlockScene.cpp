@@ -6,6 +6,7 @@
 #include "components/ComponentFactory.h"
 #include "components/ComponentInstance.h"
 #include "core/Constants.h"
+#include "ui/actions/UndoCommands.h"
 
 #include <QDataStream>
 #include <QGraphicsSceneDragDropEvent>
@@ -17,6 +18,7 @@
 #include <QMimeData>
 #include <QPainter>
 #include <QSet>
+#include <QUndoStack>
 
 BlockScene::BlockScene(ComponentFactory* factory, QObject* parent)
     : QGraphicsScene(parent)
@@ -112,13 +114,54 @@ void BlockScene::removeConnection(ConnectionItem* conn)
 {
     if (!conn) return;
 
-    if (conn->sourcePort()) conn->sourcePort()->setConnected(false);
-    if (conn->destPort())   conn->destPort()->setConnected(false);
+    if (conn->sourcePort()) conn->sourcePort()->setConnection(nullptr);
+    if (conn->destPort())   conn->destPort()->setConnection(nullptr);
 
     removeItem(conn);
     delete conn;
     emit connectionRemoved();
     emit sceneModified();
+}
+
+void BlockScene::deleteSelectedConnections()
+{
+    QList<ConnectionItem*> selectedConns;
+    for (auto* item : selectedItems()) {
+        if (auto* conn = qgraphicsitem_cast<ConnectionItem*>(item))
+            selectedConns.append(conn);
+    }
+
+    if (selectedConns.isEmpty()) return;
+
+    if (m_undoStack) {
+        if (selectedConns.size() == 1) {
+            auto* conn = selectedConns.first();
+            auto* sp = conn->sourcePort();
+            auto* dp = conn->destPort();
+            if (sp && dp && sp->parentBlock() && dp->parentBlock()) {
+                m_undoStack->push(new RemoveConnectionCommand(
+                    this,
+                    sp->parentBlock()->uuid(), sp->portId(),
+                    dp->parentBlock()->uuid(), dp->portId()));
+            }
+        } else {
+            m_undoStack->beginMacro(tr("Delete connections"));
+            for (auto* conn : selectedConns) {
+                auto* sp = conn->sourcePort();
+                auto* dp = conn->destPort();
+                if (sp && dp && sp->parentBlock() && dp->parentBlock()) {
+                    m_undoStack->push(new RemoveConnectionCommand(
+                        this,
+                        sp->parentBlock()->uuid(), sp->portId(),
+                        dp->parentBlock()->uuid(), dp->portId()));
+                }
+            }
+            m_undoStack->endMacro();
+        }
+    } else {
+        for (auto* conn : selectedConns)
+            removeConnection(conn);
+    }
 }
 
 bool BlockScene::canConnect(PortItem* source, PortItem* dest) const
@@ -155,23 +198,19 @@ QList<ConnectionItem*> BlockScene::allConnections() const
 QList<ConnectionItem*> BlockScene::connectionsForPort(PortItem* port) const
 {
     QList<ConnectionItem*> result;
-    for (auto* conn : allConnections()) {
-        if (conn->sourcePort() == port || conn->destPort() == port) {
-            result.append(conn);
-        }
-    }
+    if (port && port->connection())
+        result.append(port->connection());
     return result;
 }
 
 QList<ConnectionItem*> BlockScene::connectionsForBlock(BlockItem* block) const
 {
     QList<ConnectionItem*> result;
-    for (auto* conn : allConnections()) {
-        if (conn->sourcePort() && conn->sourcePort()->parentBlock() == block) {
-            result.append(conn);
-        }
-        else if (conn->destPort() && conn->destPort()->parentBlock() == block) {
-            result.append(conn);
+    if (!block) return result;
+    for (auto* port : block->allPorts()) {
+        if (auto* conn = port->connection()) {
+            if (!result.contains(conn))
+                result.append(conn);
         }
     }
     return result;
@@ -198,9 +237,11 @@ void BlockScene::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         PortItem* port = portAtPos(event->scenePos());
-        if (port && port->direction() == PortDirection::Output && !port->isConnected()) {
+        if (port && port->direction() == PortDirection::Output) {
             m_drawingConnection = true;
             m_connectionSource = port;
+            // If port already has a connection, remember it for reconnect
+            m_reconnectConnection = port->connection();
             m_tempConnection = new QGraphicsPathItem();
             m_tempConnection->setPen(QPen(BlockAppearance::tempConnectionColor(),
                                           BlockAppearance::CONNECTION_WIDTH,
@@ -264,10 +305,43 @@ void BlockScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
         // Try to connect
         if (m_connectionSource) {
             PortItem* target = portAtPos(event->scenePos());
-            if (target && canConnect(m_connectionSource, target)) {
-                addConnection(m_connectionSource, target);
+            bool valid = target && target->direction() == PortDirection::Input
+                        && m_connectionSource != target
+                        && m_connectionSource->parentBlock() != target->parentBlock();
+
+            if (valid) {
+                if (m_undoStack) {
+                    m_undoStack->beginMacro(tr("Reconnect"));
+                    // Remove old connection from source port (reconnect case)
+                    if (m_reconnectConnection) {
+                        auto* rc = m_reconnectConnection;
+                        m_undoStack->push(new RemoveConnectionCommand(
+                            this,
+                            rc->sourcePort()->parentBlock()->uuid(), rc->sourcePort()->portId(),
+                            rc->destPort()->parentBlock()->uuid(), rc->destPort()->portId()));
+                    }
+                    // Remove old connection from target port if occupied
+                    if (auto* oldConn = target->connection()) {
+                        m_undoStack->push(new RemoveConnectionCommand(
+                            this,
+                            oldConn->sourcePort()->parentBlock()->uuid(), oldConn->sourcePort()->portId(),
+                            oldConn->destPort()->parentBlock()->uuid(), oldConn->destPort()->portId()));
+                    }
+                    m_undoStack->push(new AddConnectionCommand(
+                        this,
+                        m_connectionSource->parentBlock()->uuid(), m_connectionSource->portId(),
+                        target->parentBlock()->uuid(), target->portId()));
+                    m_undoStack->endMacro();
+                } else {
+                    if (m_reconnectConnection)
+                        removeConnection(m_reconnectConnection);
+                    if (auto* oldConn = target->connection())
+                        removeConnection(oldConn);
+                    addConnection(m_connectionSource, target);
+                }
             }
             m_connectionSource = nullptr;
+            m_reconnectConnection = nullptr;
         }
 
         event->accept();
@@ -333,28 +407,16 @@ QPointF BlockScene::snapToGrid(const QPointF& pt) const
 
 void BlockScene::connectBlockSignals(BlockItem* block)
 {
-    connect(block, &BlockItem::positionChanged, this, [this]() {
-        // Update all connections attached to this block
-        // ConnectionItem::updatePath() is called by whoever moves the block
+    connect(block, &BlockItem::positionChanged, this, [this, block](const QUuid&, const QPointF&) {
+        for (auto* port : block->allPorts()) {
+            if (auto* conn = port->connection())
+                conn->updatePath();
+        }
         emit sceneModified();
     });
 
     connect(block, &BlockItem::propertyChanged, this, [this]() {
         emit sceneModified();
-    });
-
-    connect(block, &QGraphicsObject::xChanged, this, [this, block]() {
-        const auto conns = connectionsForBlock(block);
-        for (auto* conn : conns) {
-            conn->updatePath();
-        }
-    });
-
-    connect(block, &QGraphicsObject::yChanged, this, [this, block]() {
-        const auto conns = connectionsForBlock(block);
-        for (auto* conn : conns) {
-            conn->updatePath();
-        }
     });
 }
 
@@ -463,6 +525,7 @@ void BlockScene::clearScene()
     clear();
     m_tempConnection = nullptr;
     m_connectionSource = nullptr;
+    m_reconnectConnection = nullptr;
     m_drawingConnection = false;
     emit sceneModified();
 }

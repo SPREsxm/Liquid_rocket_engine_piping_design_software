@@ -1,14 +1,17 @@
 #include "ConnectionItem.h"
 #include "PortItem.h"
 #include "BlockItem.h"
+#include "BlockScene.h"
 
 #include <QAction>
 #include <QCursor>
 #include <QGraphicsScene>
 #include <QGraphicsSceneContextMenuEvent>
+#include <QGraphicsSceneHoverEvent>
 #include <QMenu>
 #include <QPainter>
 #include <QPen>
+#include <QToolTip>
 #include <QtMath>
 
 ConnectionItem::ConnectionItem(PortItem* sourcePort, PortItem* destPort,
@@ -25,9 +28,25 @@ ConnectionItem::ConnectionItem(PortItem* sourcePort, PortItem* destPort,
     setFlag(ItemIsSelectable, true);
     setCursor(QCursor(Qt::PointingHandCursor));
 
-    if (m_sourcePort) m_sourcePort->setConnected(true);
-    if (m_destPort)   m_destPort->setConnected(true);
+    if (m_sourcePort) m_sourcePort->setConnection(this);
+    if (m_destPort)   m_destPort->setConnection(this);
 
+    updatePath();
+}
+
+void ConnectionItem::setSourcePort(PortItem* port)
+{
+    if (m_sourcePort) m_sourcePort->setConnection(nullptr);
+    m_sourcePort = port;
+    if (m_sourcePort) m_sourcePort->setConnection(this);
+    updatePath();
+}
+
+void ConnectionItem::setDestPort(PortItem* port)
+{
+    if (m_destPort) m_destPort->setConnection(nullptr);
+    m_destPort = port;
+    if (m_destPort) m_destPort->setConnection(this);
     updatePath();
 }
 
@@ -38,8 +57,8 @@ void ConnectionItem::updatePath()
     QPointF src = m_sourcePort->centerInScene();
     QPointF dst = m_destPort->centerInScene();
 
-    QPainterPath path;
-    path.moveTo(src);
+    QPainterPath p;
+    p.moveTo(src);
 
     qreal dx = qAbs(dst.x() - src.x()) * 0.5;
     dx = qMax(dx, 50.0);
@@ -47,8 +66,8 @@ void ConnectionItem::updatePath()
     QPointF ctrl1(src.x() + dx, src.y());
     QPointF ctrl2(dst.x() - dx, dst.y());
 
-    path.cubicTo(ctrl1, ctrl2, dst);
-    setPath(path);
+    p.cubicTo(ctrl1, ctrl2, dst);
+    setPath(p);
 }
 
 void ConnectionItem::setFlowData(double flowRate, double maxFlowRate)
@@ -77,29 +96,33 @@ void ConnectionItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, Q
         width = qMax(width, 3.0);
     }
 
+    QPainterPath p = path();
     painter->setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter->drawPath(path());
+    painter->drawPath(p);
 
     // Arrow head at destination
     if (!m_destPort) return;
 
     QPointF dst = m_destPort->centerInScene();
-    QPainterPath pathData = path();
-    qreal t = pathData.percentAtLength(pathData.length() - BlockAppearance::PORT_RADIUS - 4);
-    QPointF tip = dst;
-    QPointF tangent = pathData.pointAtPercent(qMax(0.0, t - 0.02)); // point slightly before tip
+    // Use simple linear interpolation on the last segment for the arrow tangent
+    // instead of expensive percentAtLength/pointAtPercent on the whole cubic path.
+    qreal pathLen = p.length();
+    qreal t = (pathLen > 0.001) ? (1.0 - (BlockAppearance::PORT_RADIUS + 4.0) / pathLen) : 0.0;
+    t = qBound(0.0, t, 1.0);
+    QPointF nearTip = p.pointAtPercent(t);
+    QPointF tangent  = (t > 0.01) ? p.pointAtPercent(t - 0.02) : p.pointAtPercent(0.0);
 
-    QPointF dir = tip - tangent;
+    QPointF dir = nearTip - tangent;
     qreal len = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y());
     if (len < 0.001) return;
     dir /= len;
 
     qreal arrowSize = 8.0;
     QPointF normal(-dir.y(), dir.x());
-    QPointF base = tip - dir * arrowSize * 1.2;
+    QPointF base = dst - dir * arrowSize * 1.2;
 
     QPolygonF arrowHead;
-    arrowHead << tip;
+    arrowHead << dst;
     arrowHead << base + normal * arrowSize * 0.5;
     arrowHead << base - normal * arrowSize * 0.5;
 
@@ -116,11 +139,47 @@ void ConnectionItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* event)
 
     QAction* chosen = menu.exec(event->screenPos());
     if (chosen == deleteAction) {
-        if (m_sourcePort) m_sourcePort->setConnected(false);
-        if (m_destPort)   m_destPort->setConnected(false);
-        if (auto* s = scene()) {
+        // Delegate to scene so it can use the undo stack
+        if (auto* bs = qobject_cast<BlockScene*>(scene())) {
+            bs->deleteSelectedConnections();
+        } else if (auto* s = scene()) {
+            // Fallback for non-BlockScene (should not happen in production)
+            if (m_sourcePort) m_sourcePort->setConnection(nullptr);
+            if (m_destPort)   m_destPort->setConnection(nullptr);
             s->removeItem(this);
             delete this;
         }
     }
+}
+
+void ConnectionItem::setAnalysisTooltip(double pressureDrop, double flowRate)
+{
+    m_hasFlowData = true;
+    m_tooltipPressureDrop = pressureDrop;
+    m_tooltipFlowRate = flowRate;
+}
+
+void ConnectionItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event)
+{
+    if (m_hasFlowData) {
+        QString tip = QStringLiteral("Flow: %1 kg/s\nΔP: %2 Pa")
+            .arg(m_tooltipFlowRate, 0, 'f', 4)
+            .arg(m_tooltipPressureDrop, 0, 'e', 3);
+        QToolTip::showText(event->screenPos(), tip);
+    }
+}
+
+void ConnectionItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
+{
+    if (m_hasFlowData) {
+        QString tip = QStringLiteral("Flow: %1 kg/s\nΔP: %2 Pa")
+            .arg(m_tooltipFlowRate, 0, 'f', 4)
+            .arg(m_tooltipPressureDrop, 0, 'e', 3);
+        QToolTip::showText(event->screenPos(), tip);
+    }
+}
+
+void ConnectionItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* /*event*/)
+{
+    QToolTip::hideText();
 }

@@ -84,6 +84,21 @@ private:
     QString m_srcPortId, m_dstPortId;
 };
 
+class RemoveConnectionCommand : public QUndoCommand {
+public:
+    RemoveConnectionCommand(BlockScene* scene, const QUuid& srcBlockUuid,
+                            const QString& srcPortId,
+                            const QUuid& dstBlockUuid, const QString& dstPortId,
+                            QUndoCommand* parent = nullptr);
+    void undo() override;
+    void redo() override;
+
+private:
+    BlockScene* m_scene;
+    QUuid m_srcBlockUuid, m_dstBlockUuid;
+    QString m_srcPortId, m_dstPortId;
+};
+
 // ─── Change Property ────────────────────────────────────────
 
 class ChangePropertyCommand : public QUndoCommand {

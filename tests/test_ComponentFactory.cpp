@@ -13,29 +13,29 @@ TEST_CASE("ComponentFactory has six categories") {
     REQUIRE(cats.contains("Combustion"));
 }
 
-TEST_CASE("ComponentFactory returns 5 pipes") {
+TEST_CASE("ComponentFactory returns correct pipe count") {
     auto pipes = ComponentFactory::instance().componentsInCategory("Pipes");
-    REQUIRE(pipes.size() == 5);
+    REQUIRE(pipes.size() == 11);
 }
 
-TEST_CASE("ComponentFactory returns 6 valves") {
+TEST_CASE("ComponentFactory returns correct valve count") {
     auto valves = ComponentFactory::instance().componentsInCategory("Valves");
-    REQUIRE(valves.size() == 6);
+    REQUIRE(valves.size() == 17);
 }
 
-TEST_CASE("ComponentFactory returns 2 pumps") {
+TEST_CASE("ComponentFactory returns correct pump count") {
     auto pumps = ComponentFactory::instance().componentsInCategory("Pumps");
-    REQUIRE(pumps.size() == 2);
+    REQUIRE(pumps.size() == 7);
 }
 
-TEST_CASE("ComponentFactory returns 2 sensors") {
+TEST_CASE("ComponentFactory returns correct sensor count") {
     auto sensors = ComponentFactory::instance().componentsInCategory("Sensors");
-    REQUIRE(sensors.size() == 2);
+    REQUIRE(sensors.size() == 4);
 }
 
-TEST_CASE("ComponentFactory returns 2 tanks") {
+TEST_CASE("ComponentFactory returns correct tank count") {
     auto tanks = ComponentFactory::instance().componentsInCategory("Tanks");
-    REQUIRE(tanks.size() == 2);
+    REQUIRE(tanks.size() == 4);
 }
 
 TEST_CASE("descriptorForType returns correct descriptor") {
@@ -101,7 +101,7 @@ TEST_CASE("Nozzle has chamber properties") {
     REQUIRE(hasAreaRatio);
 }
 
-TEST_CASE("Combustion category has 3 components") {
+TEST_CASE("Combustion category has correct count") {
     auto comps = ComponentFactory::instance().componentsInCategory("Combustion");
-    REQUIRE(comps.size() == 3);
+    REQUIRE(comps.size() == 5);
 }

@@ -10,4 +10,8 @@ target_sources(lrep_ui PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/BlockScene.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/BlockView.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/BlockView.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/PaintChartWidget.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/PaintChartWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/LegendWidget.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/LegendWidget.cpp"
 )

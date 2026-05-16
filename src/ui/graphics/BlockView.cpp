@@ -6,6 +6,7 @@
 #include "components/ComponentFactory.h"
 #include "components/ComponentDescriptor.h"
 #include "core/Constants.h"
+#include "ui/actions/UndoCommands.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -20,6 +21,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QSet>
+#include <QUndoStack>
 #include <QWheelEvent>
 #include <QtMath>
 
@@ -89,16 +91,42 @@ void BlockView::zoomToFit()
 void BlockView::deleteSelected()
 {
     auto selected = scene()->selectedItems();
+    QUndoStack* stack = m_scene->undoStack();
 
+    // Separate connections and blocks
+    QList<ConnectionItem*> conns;
+    QList<BlockItem*> blocks;
     for (auto* item : selected) {
-        if (auto* conn = qgraphicsitem_cast<ConnectionItem*>(item)) {
-            m_scene->removeConnection(conn);
-        }
+        if (auto* conn = qgraphicsitem_cast<ConnectionItem*>(item))
+            conns.append(conn);
+        else if (auto* block = qgraphicsitem_cast<BlockItem*>(item))
+            blocks.append(block);
     }
-    for (auto* item : selected) {
-        if (auto* block = qgraphicsitem_cast<BlockItem*>(item)) {
-            m_scene->removeBlock(block);
+
+    if (stack && (!conns.isEmpty() || !blocks.isEmpty())) {
+        bool multi = (conns.size() + blocks.size()) > 1;
+        if (multi) stack->beginMacro(QObject::tr("Delete selected"));
+
+        for (auto* conn : conns) {
+            auto* sp = conn->sourcePort();
+            auto* dp = conn->destPort();
+            if (sp && dp && sp->parentBlock() && dp->parentBlock()) {
+                stack->push(new RemoveConnectionCommand(
+                    m_scene,
+                    sp->parentBlock()->uuid(), sp->portId(),
+                    dp->parentBlock()->uuid(), dp->portId()));
+            }
         }
+        for (auto* block : blocks) {
+            stack->push(new RemoveBlockCommand(m_scene, block->uuid()));
+        }
+
+        if (multi) stack->endMacro();
+    } else {
+        for (auto* conn : conns)
+            m_scene->removeConnection(conn);
+        for (auto* block : blocks)
+            m_scene->removeBlock(block);
     }
 }
 

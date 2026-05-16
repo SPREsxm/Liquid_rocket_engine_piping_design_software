@@ -170,6 +170,49 @@ void AddConnectionCommand::undo()
     }
 }
 
+// ─── RemoveConnectionCommand ────────────────────────────────
+
+RemoveConnectionCommand::RemoveConnectionCommand(
+    BlockScene* scene, const QUuid& srcBlockUuid, const QString& srcPortId,
+    const QUuid& dstBlockUuid, const QString& dstPortId, QUndoCommand* parent)
+    : QUndoCommand(parent)
+    , m_scene(scene)
+    , m_srcBlockUuid(srcBlockUuid), m_srcPortId(srcPortId)
+    , m_dstBlockUuid(dstBlockUuid), m_dstPortId(dstPortId)
+{
+    setText(QObject::tr("Remove connection"));
+}
+
+void RemoveConnectionCommand::redo()
+{
+    for (auto* conn : m_scene->allConnections()) {
+        if (conn->sourcePort() && conn->destPort()
+            && conn->sourcePort()->parentBlock()
+            && conn->destPort()->parentBlock()
+            && conn->sourcePort()->parentBlock()->uuid() == m_srcBlockUuid
+            && conn->sourcePort()->portId() == m_srcPortId
+            && conn->destPort()->parentBlock()->uuid() == m_dstBlockUuid
+            && conn->destPort()->portId() == m_dstPortId)
+        {
+            m_scene->removeConnection(conn);
+            break;
+        }
+    }
+}
+
+void RemoveConnectionCommand::undo()
+{
+    auto* srcBlock = m_scene->blockByUuid(m_srcBlockUuid);
+    auto* dstBlock = m_scene->blockByUuid(m_dstBlockUuid);
+    if (srcBlock && dstBlock) {
+        auto* srcPort = srcBlock->portById(m_srcPortId);
+        auto* dstPort = dstBlock->portById(m_dstPortId);
+        if (srcPort && dstPort) {
+            m_scene->addConnection(srcPort, dstPort);
+        }
+    }
+}
+
 // ─── ChangePropertyCommand ─────────────────────────────────
 
 ChangePropertyCommand::ChangePropertyCommand(
