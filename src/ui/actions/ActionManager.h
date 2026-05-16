@@ -33,6 +33,7 @@ enum class ActionId {
     RunAnalysis,
     Validate,
     GenerateBom,
+    OptimizePipes,
     Preferences,
     // Help
     About,

@@ -6,6 +6,7 @@
 class BlockItem;
 class PortItem;
 class ConnectionItem;
+class QGraphicsLineItem;
 struct ComponentDescriptor;
 class ComponentFactory;
 class QUndoStack;
@@ -35,6 +36,7 @@ public:
 
     // Selection
     BlockItem* selectedBlock() const;
+    QList<BlockItem*> selectedBlocks() const;
 
     // Grid
     void setSnapEnabled(bool enabled) { m_snapEnabled = enabled; }
@@ -52,6 +54,7 @@ signals:
     void connectionAdded(ConnectionItem* conn);
     void connectionRemoved();
     void blockSelectionChanged(BlockItem* block);
+    void multiSelectionChanged();
     void sceneModified();
 
 protected:
@@ -77,5 +80,11 @@ private:
     ConnectionItem* m_reconnectConnection = nullptr; // existing conn being reconnected
     QGraphicsPathItem* m_tempConnection = nullptr;
 
+    void clearAlignmentLines();
+    void updateAlignmentLines(const QList<QGraphicsItem*>& draggedItems);
+
     bool m_snapEnabled = true;
+    bool m_alignmentEnabled = true;
+    QList<QGraphicsLineItem*> m_alignmentLines;
+    static constexpr qreal ALIGN_THRESHOLD = 5.0;
 };

@@ -19,6 +19,8 @@
 #include "utils/GridRefinement.h"
 #include "utils/DesignRules.h"
 #include "utils/BomGenerator.h"
+#include "utils/PipeOptimizer.h"
+#include "utils/ThermalSolver.h"
 #include "components/ComponentFactory.h"
 #include "components/ComponentDescriptor.h"
 #include "core/Constants.h"
@@ -90,8 +92,20 @@ MainWindow::MainWindow(QWidget* parent)
             m_statusLabel->setText(tr("Selected: %1 [%2]")
                 .arg(block->customLabel()).arg(block->typeId()));
         } else {
-            m_statusLabel->setText(tr("Ready"));
+            auto sel = m_blockScene->selectedBlocks();
+            if (sel.size() > 1) {
+                m_statusLabel->setText(tr("Selected: %1 blocks").arg(sel.size()));
+            } else {
+                m_statusLabel->setText(tr("Ready"));
+            }
         }
+    });
+
+    // Connect multi-selection for batch property editing
+    connect(m_blockScene, &BlockScene::multiSelectionChanged, this,
+            [this]() {
+        auto sel = m_blockScene->selectedBlocks();
+        m_propertyEditor->showBlocksProperties(sel);
     });
 
     restoreSettings();
@@ -240,6 +254,7 @@ void MainWindow::createActions()
     connect(am.action(ActionId::RunAnalysis), &QAction::triggered, this, &MainWindow::onRunAnalysis);
     connect(am.action(ActionId::Validate), &QAction::triggered, this, &MainWindow::onValidate);
     connect(am.action(ActionId::GenerateBom), &QAction::triggered, this, &MainWindow::onGenerateBom);
+    connect(am.action(ActionId::OptimizePipes), &QAction::triggered, this, &MainWindow::onOptimize);
     connect(am.action(ActionId::Preferences), &QAction::triggered, this, &MainWindow::onPreferences);
 
     // Help
@@ -296,6 +311,7 @@ void MainWindow::createMenus()
     m_toolsMenu->addAction(am.action(ActionId::RunAnalysis));
     m_toolsMenu->addAction(am.action(ActionId::Validate));
     m_toolsMenu->addAction(am.action(ActionId::GenerateBom));
+    m_toolsMenu->addAction(am.action(ActionId::OptimizePipes));
     m_toolsMenu->addSeparator();
     m_toolsMenu->addAction(am.action(ActionId::Preferences));
 
@@ -444,9 +460,7 @@ void MainWindow::createDockWidgets()
     m_propertyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     addDockWidget(Qt::RightDockWidgetArea, m_propertyDock);
 
-    // Connect scene selection to property editor
-    connect(m_blockScene, &BlockScene::blockSelectionChanged,
-            m_propertyEditor, &PropertyEditor::showBlockProperties);
+    // Property editor now driven by multiSelectionChanged in constructor above
 
     // Message log (bottom)
     m_messageDock = new QDockWidget(tr("Messages"), this);
@@ -714,6 +728,24 @@ void MainWindow::onRunAnalysis()
     m_resultsDock->setTransientResults(trans);
     appendMessage(trans.message);
 
+    // Compute thermal-structural post-processing
+    ThermalStressResult tsResult = computeThermalStress(m_blockScene, sol, solverSettings);
+    m_resultsDock->setThermalStressResults(tsResult);
+    appendMessage(QString("Thermal/Stress: %1 edges, min SF=%2, yield exceeded=%3")
+        .arg(tsResult.edges.size())
+        .arg(tsResult.minSafetyFactor, 0, 'f', 2)
+        .arg(tsResult.edgesWithYieldExceeded));
+
+    // Run extended design checks including pipe stress
+    DesignCheckResult extDesignResult = runDesignChecks(
+        m_blockScene, sol, solverSettings, maxDpPa, tsResult);
+    if (extDesignResult.items.size() > designResult.items.size()) {
+        m_resultsDock->setDesignCheckResults(extDesignResult);
+        if (extDesignResult.errorCount() > designResult.errorCount())
+            appendMessage(QString("Extended design checks: %1 error(s), %2 warning(s)")
+                .arg(extDesignResult.errorCount()).arg(extDesignResult.warningCount()));
+    }
+
     m_blockScene->update();
     m_statusLabel->setText(tr("Analysis complete — %1 nodes, %2 edges, ΔP=%3 Pa")
         .arg(sol.nodes.size()).arg(sol.edges.size())
@@ -836,6 +868,52 @@ void MainWindow::onGenerateBom()
         QMessageBox::warning(this, tr("BOM Export"),
             tr("Failed to write BOM file."));
     }
+}
+
+void MainWindow::onOptimize()
+{
+    // Quick topology check
+    auto topo = validateTopology(m_blockScene);
+    if (topo.hasErrors()) {
+        QMessageBox::warning(this, tr("Optimization"),
+            tr("Fix topology errors before optimizing."));
+        return;
+    }
+
+    SolverSettings solverSettings = SolverSettings::fromQSettings();
+    const double inletPressurePa = m_inletPressureSpin->value() * 1.0e6;
+    const double inletMassFlow = m_inletFlowSpin->value();
+    double maxDpPa = m_maxPressureDropSpin ? m_maxPressureDropSpin->value() * 1.0e6 : -1.0;
+
+    FluidType fType = static_cast<FluidType>(m_fluidTypeCombo->currentData().toInt());
+    auto fProps = fluidDefaults(fType);
+    QSettings qs;
+    solverSettings.fluidDensity = qs.value("Solver/FluidDensity", fProps.density).toDouble();
+    solverSettings.fluidViscosity = qs.value("Solver/FluidViscosity", fProps.viscosity).toDouble();
+    solverSettings.fluidType = fType;
+
+    appendMessage("--- Pipe optimization started ---");
+    m_statusLabel->setText(tr("Optimizing pipe schedules..."));
+
+    OptimizationResult result = optimizePipeSchedules(
+        m_blockScene, solverSettings, inletPressurePa, inletMassFlow, maxDpPa);
+
+    m_resultsDock->setOptimizationResults(result);
+    m_resultsDock->raise();
+
+    appendMessage(QString("Optimization complete — weight: %1 → %2 kg (saved %3 kg, %4%)")
+        .arg(result.originalTotalWeight_kg, 0, 'f', 1)
+        .arg(result.optimizedTotalWeight_kg, 0, 'f', 1)
+        .arg(result.weightSaved_kg, 0, 'f', 1)
+        .arg(result.originalTotalWeight_kg > 0.0
+             ? result.weightSaved_kg / result.originalTotalWeight_kg * 100.0 : 0.0, 0, 'f', 1));
+
+    if (!result.allConstraintsSatisfied)
+        appendMessage(QString("WARNING: %1 constraint(s) violated")
+            .arg(result.violatedConstraints.size()));
+
+    m_statusLabel->setText(tr("Optimization complete"));
+    m_blockScene->update();
 }
 
 // ─── Help ───────────────────────────────────────────────────

@@ -59,6 +59,7 @@ private:
     void onRunAnalysis();
     void onValidate();
     void onGenerateBom();
+    void onOptimize();
     void onPreferences();
 
     // Plugin & solver

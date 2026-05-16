@@ -9,6 +9,7 @@
 #include "ui/actions/UndoCommands.h"
 
 #include <QDataStream>
+#include <QGraphicsLineItem>
 #include <QGraphicsSceneDragDropEvent>
 #include <QGraphicsSceneMouseEvent>
 #include <QIODevice>
@@ -84,6 +85,17 @@ BlockItem* BlockScene::selectedBlock() const
         return qgraphicsitem_cast<BlockItem*>(selected.first());
     }
     return nullptr;
+}
+
+QList<BlockItem*> BlockScene::selectedBlocks() const
+{
+    QList<BlockItem*> result;
+    for (auto* item : selectedItems()) {
+        if (auto* block = qgraphicsitem_cast<BlockItem*>(item)) {
+            result.append(block);
+        }
+    }
+    return result;
 }
 
 // ─── Connection Management ─────────────────────────────────
@@ -251,6 +263,30 @@ void BlockScene::mousePressEvent(QGraphicsSceneMouseEvent* event)
             event->accept();
             return;
         }
+
+        // Multi-select with Shift/Ctrl modifier on BlockItem click
+        bool hasMod = event->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier);
+        if (hasMod) {
+            QList<QGraphicsItem*> itemsAt = items(event->scenePos(), Qt::IntersectsItemShape,
+                                                   Qt::DescendingOrder);
+            BlockItem* clickedBlock = nullptr;
+            for (auto* item : itemsAt) {
+                if ((clickedBlock = qgraphicsitem_cast<BlockItem*>(item)))
+                    break;
+            }
+
+            if (clickedBlock) {
+                if (event->modifiers() & Qt::ControlModifier) {
+                    clickedBlock->setSelected(!clickedBlock->isSelected());
+                } else {
+                    clickedBlock->setSelected(true);
+                }
+                emit blockSelectionChanged(selectedBlock());
+                emit multiSelectionChanged();
+                event->accept();
+                return;
+            }
+        }
     }
     QGraphicsScene::mousePressEvent(event);
 }
@@ -280,11 +316,31 @@ void BlockScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
         event->accept();
         return;
     }
+
+    // During block drag, show alignment guide lines
+    if (m_alignmentEnabled) {
+        auto sel = selectedItems();
+        bool draggingBlock = false;
+        for (auto* item : sel) {
+            if (qgraphicsitem_cast<BlockItem*>(item)) {
+                draggingBlock = true;
+                break;
+            }
+        }
+        if (draggingBlock)
+            updateAlignmentLines(sel);
+        else
+            clearAlignmentLines();
+    }
+
     QGraphicsScene::mouseMoveEvent(event);
 }
 
 void BlockScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
 {
+    // Clear alignment guide lines on any mouse release
+    clearAlignmentLines();
+
     if (m_drawingConnection) {
         m_drawingConnection = false;
 
@@ -349,8 +405,13 @@ void BlockScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     }
     QGraphicsScene::mouseReleaseEvent(event);
 
-    // Selection change signal
-    emit blockSelectionChanged(selectedBlock());
+    // Selection change signals
+    auto blocks = selectedBlocks();
+    if (blocks.size() == 1)
+        emit blockSelectionChanged(blocks.first());
+    else
+        emit blockSelectionChanged(nullptr);
+    emit multiSelectionChanged();
 }
 
 // ─── Drag-and-Drop from Library ────────────────────────────
@@ -423,6 +484,102 @@ void BlockScene::connectBlockSignals(BlockItem* block)
 // ─── Selection ─────────────────────────────────────────────
 
 // BlockScene overrides mouseReleaseEvent to emit blockSelectionChanged above
+
+// ─── Alignment Guide Lines ─────────────────────────────────
+
+void BlockScene::clearAlignmentLines()
+{
+    for (auto* line : m_alignmentLines) {
+        removeItem(line);
+        delete line;
+    }
+    m_alignmentLines.clear();
+}
+
+void BlockScene::updateAlignmentLines(const QList<QGraphicsItem*>& draggedItems)
+{
+    clearAlignmentLines();
+
+    // Collect dragged block centers/edges
+    struct Rect { qreal left, top, right, bottom, cx, cy; };
+    QList<Rect> dragged;
+    QSet<BlockItem*> draggedSet;
+    for (auto* item : draggedItems) {
+        if (auto* block = qgraphicsitem_cast<BlockItem*>(item)) {
+            auto br = block->sceneBoundingRect();
+            dragged.append({br.left(), br.top(), br.right(), br.bottom(),
+                           br.center().x(), br.center().y()});
+            draggedSet.insert(block);
+        }
+    }
+    if (dragged.isEmpty()) return;
+
+    // Collect non-dragged block centers/edges
+    QList<Rect> anchors;
+    for (auto* block : allBlocks()) {
+        if (draggedSet.contains(block)) continue;
+        auto br = block->sceneBoundingRect();
+        anchors.append({br.left(), br.top(), br.right(), br.bottom(),
+                       br.center().x(), br.center().y()});
+    }
+
+    // Check alignment for each dragged block against anchors
+    QPen guidePen(QColor("#42A5F5"), 1.0, Qt::DashLine);
+    QRectF sceneRect = this->sceneRect();
+
+    for (const auto& d : dragged) {
+        for (const auto& a : anchors) {
+            // Horizontal alignment: center X
+            if (qAbs(d.cx - a.cx) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(a.cx, sceneRect.top(), a.cx, sceneRect.bottom());
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+            // Horizontal alignment: left edges
+            if (qAbs(d.left - a.left) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(a.left, sceneRect.top(), a.left, sceneRect.bottom());
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+            // Horizontal alignment: right edges
+            if (qAbs(d.right - a.right) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(a.right, sceneRect.top(), a.right, sceneRect.bottom());
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+            // Vertical alignment: center Y
+            if (qAbs(d.cy - a.cy) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(sceneRect.left(), a.cy, sceneRect.right(), a.cy);
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+            // Vertical alignment: top edges
+            if (qAbs(d.top - a.top) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(sceneRect.left(), a.top, sceneRect.right(), a.top);
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+            // Vertical alignment: bottom edges
+            if (qAbs(d.bottom - a.bottom) < ALIGN_THRESHOLD) {
+                auto* line = new QGraphicsLineItem(sceneRect.left(), a.bottom, sceneRect.right(), a.bottom);
+                line->setPen(guidePen);
+                line->setZValue(100);
+                addItem(line);
+                m_alignmentLines.append(line);
+            }
+        }
+    }
+}
 
 // ─── Serialization ─────────────────────────────────────────
 

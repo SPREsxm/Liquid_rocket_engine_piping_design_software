@@ -14,6 +14,8 @@
 #include "utils/BomGenerator.h"
 #include "utils/SensitivitySolver.h"
 #include "utils/TransientSolver.h"
+#include "utils/PipeOptimizer.h"
+#include "utils/ThermalSolver.h"
 
 #include <QTimer>
 
@@ -53,6 +55,12 @@ public:
         QString nodeLabel;
     };
     void setPathProfile(const QVector<PathProfilePoint>& profile);
+
+    // Optimization
+    void setOptimizationResults(const OptimizationResult& result);
+
+    // Thermal / Stress
+    void setThermalStressResults(const ThermalStressResult& result);
 
 private slots:
     void onExportCsv();
@@ -116,6 +124,17 @@ private:
     QWidget* m_pathProfileTab = nullptr;
     PaintChartWidget* m_pathProfileChart = nullptr;
     QTableWidget* m_pathProfileTable = nullptr;
+
+    // Optimization tab
+    QWidget* m_optimizationTab = nullptr;
+    QTableWidget* m_optimizationTable = nullptr;
+    QLabel* m_optimizationSummary = nullptr;
+
+    // Thermal / Stress tab
+    QWidget* m_thermalTab = nullptr;
+    QTableWidget* m_thermalTable = nullptr;
+    QLabel* m_thermalSummary = nullptr;
+    PaintChartWidget* m_thermalChart = nullptr;
 
     // Transient animation
     std::vector<TransientState> m_transientHistory;

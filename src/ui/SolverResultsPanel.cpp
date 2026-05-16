@@ -212,6 +212,52 @@ void SolverResultsPanel::setupUi()
 
     m_tabWidget->addTab(m_pathProfileTab, tr("Path Profile"));
 
+    // ── Optimization tab ──────────────────────────────────
+    m_optimizationTab = new QWidget;
+    auto* optLayout = new QVBoxLayout(m_optimizationTab);
+
+    m_optimizationSummary = new QLabel(tr("Run optimization from Tools menu."));
+    m_optimizationSummary->setWordWrap(true);
+    optLayout->addWidget(m_optimizationSummary);
+
+    m_optimizationTable = new QTableWidget(0, 7);
+    m_optimizationTable->setHorizontalHeaderLabels({
+        tr("Component"), tr("Old NPS"), tr("Old Schedule"),
+        tr("New NPS"), tr("New Schedule"),
+        tr("Old Weight (kg)"), tr("New Weight (kg)")
+    });
+    m_optimizationTable->horizontalHeader()->setStretchLastSection(true);
+    m_optimizationTable->setAlternatingRowColors(true);
+    m_optimizationTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    optLayout->addWidget(m_optimizationTable);
+    m_tabWidget->addTab(m_optimizationTab, tr("Optimization"));
+
+    // ── Thermal / Stress tab ──────────────────────────────
+    m_thermalTab = new QWidget;
+    auto* thermLayout = new QVBoxLayout(m_thermalTab);
+
+    m_thermalSummary = new QLabel(tr("Run analysis to compute thermal and stress data."));
+    m_thermalSummary->setWordWrap(true);
+    thermLayout->addWidget(m_thermalSummary);
+
+    m_thermalChart = new PaintChartWidget;
+    m_thermalChart->setChartType(PaintChartWidget::BarChart);
+    m_thermalChart->setXLabel(tr("Edge Index"));
+    m_thermalChart->setYLabel(tr("Heat Transfer Coeff. (W/m²·K)"));
+    m_thermalChart->setTitle(tr("Convective Heat Transfer Coefficient"));
+    thermLayout->addWidget(m_thermalChart, 1);
+
+    m_thermalTable = new QTableWidget(0, 6);
+    m_thermalTable->setHorizontalHeaderLabels({
+        tr("Edge"), tr("Re"), tr("h (W/m²·K)"),
+        tr("σ_vm (MPa)"), tr("Safety Factor"), tr("Yield?")
+    });
+    m_thermalTable->horizontalHeader()->setStretchLastSection(true);
+    m_thermalTable->setAlternatingRowColors(true);
+    m_thermalTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    thermLayout->addWidget(m_thermalTable);
+    m_tabWidget->addTab(m_thermalTab, tr("Thermal/Stress"));
+
     // ── Transient animation (embedded in Transient tab) ──
     {
         auto* animWidget = new QWidget;
@@ -704,4 +750,88 @@ void SolverResultsPanel::onTransientFrame()
             m_transientPlayBtn->setText(tr("▶ Play"));
         }
     }
+}
+
+// ── Optimization Results ──────────────────────────────────────────
+
+void SolverResultsPanel::setOptimizationResults(const OptimizationResult& result)
+{
+    m_optimizationTable->setRowCount(result.selections.size());
+    for (int i = 0; i < result.selections.size(); ++i) {
+        const auto& sel = result.selections[i];
+        m_optimizationTable->setItem(i, 0, new QTableWidgetItem(sel.blockLabel));
+        m_optimizationTable->setItem(i, 1, new QTableWidgetItem(
+            QString::number(sel.oldNPS, 'f', 2)));
+        m_optimizationTable->setItem(i, 2, new QTableWidgetItem(sel.oldSchedule));
+        m_optimizationTable->setItem(i, 3, new QTableWidgetItem(
+            QString::number(sel.newNPS, 'f', 2)));
+        m_optimizationTable->setItem(i, 4, new QTableWidgetItem(sel.newSchedule));
+        m_optimizationTable->setItem(i, 5, new QTableWidgetItem(
+            QString::number(sel.oldWeight_kg, 'f', 2)));
+        m_optimizationTable->setItem(i, 6, new QTableWidgetItem(
+            QString::number(sel.newWeight_kg, 'f', 2)));
+    }
+    m_optimizationTable->resizeColumnsToContents();
+
+    QString summary;
+    summary += tr("Original weight: %1 kg\n").arg(result.originalTotalWeight_kg, 0, 'f', 2);
+    summary += tr("Optimized weight: %1 kg\n").arg(result.optimizedTotalWeight_kg, 0, 'f', 2);
+    summary += tr("Weight saved: %1 kg (%2%)\n")
+        .arg(result.weightSaved_kg, 0, 'f', 2)
+        .arg(result.originalTotalWeight_kg > 0.0
+             ? result.weightSaved_kg / result.originalTotalWeight_kg * 100.0 : 0.0, 0, 'f', 1);
+    summary += tr("Iterations: %1\n").arg(result.iterationsRun);
+    summary += tr("All constraints satisfied: %1")
+        .arg(result.allConstraintsSatisfied ? tr("Yes") : tr("No"));
+
+    if (!result.violatedConstraints.isEmpty()) {
+        summary += "\n\n" + tr("Violations:") + "\n";
+        for (const auto& v : result.violatedConstraints)
+            summary += "  • " + v + "\n";
+    }
+
+    m_optimizationSummary->setText(summary);
+    m_tabWidget->setCurrentWidget(m_optimizationTab);
+}
+
+// ── Thermal / Stress Results ───────────────────────────────────────
+
+void SolverResultsPanel::setThermalStressResults(const ThermalStressResult& result)
+{
+    m_thermalTable->setRowCount(result.edges.size());
+    QVector<QPointF> htcData;
+    htcData.reserve(result.edges.size());
+
+    for (int i = 0; i < result.edges.size(); ++i) {
+        const auto& te = result.edges[i];
+        m_thermalTable->setItem(i, 0, new QTableWidgetItem(
+            te.sourceUuid.toString(QUuid::WithoutBraces).left(6) + "→" +
+            te.destUuid.toString(QUuid::WithoutBraces).left(6)));
+        m_thermalTable->setItem(i, 1, new QTableWidgetItem(
+            QString::number(te.reynoldsNumber, 'e', 2)));
+        m_thermalTable->setItem(i, 2, new QTableWidgetItem(
+            QString::number(te.heatTransferCoeff_Wpm2K, 'f', 1)));
+        m_thermalTable->setItem(i, 3, new QTableWidgetItem(
+            QString::number(te.vonMisesStress_Pa / 1.0e6, 'f', 2)));
+        m_thermalTable->setItem(i, 4, new QTableWidgetItem(
+            QString::number(te.safetyFactor, 'f', 2)));
+        auto* yieldItem = new QTableWidgetItem(te.yieldExceeded ? tr("YES") : tr("no"));
+        if (te.yieldExceeded) yieldItem->setForeground(QColor("#C62828"));
+        m_thermalTable->setItem(i, 5, yieldItem);
+
+        htcData.append(QPointF(static_cast<double>(i + 1),
+                                te.heatTransferCoeff_Wpm2K));
+    }
+    m_thermalTable->resizeColumnsToContents();
+
+    m_thermalChart->setData(htcData);
+
+    QString summary;
+    summary += tr("Edges analyzed: %1\n").arg(result.edges.size());
+    summary += tr("Min safety factor: %1\n").arg(result.minSafetyFactor, 0, 'f', 2);
+    summary += tr("Edges with yield exceeded: %1\n").arg(result.edgesWithYieldExceeded);
+    summary += tr("Avg heat transfer coeff.: %1 W/(m²·K)")
+        .arg(result.avgHeatTransferCoeff, 0, 'f', 1);
+
+    m_thermalSummary->setText(summary);
 }

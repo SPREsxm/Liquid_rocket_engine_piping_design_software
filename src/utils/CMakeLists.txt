@@ -33,6 +33,10 @@ add_library(lrep_utils STATIC
     BomGenerator.cpp
     SensitivitySolver.h
     SensitivitySolver.cpp
+    PipeOptimizer.h
+    PipeOptimizer.cpp
+    ThermalSolver.h
+    ThermalSolver.cpp
 )
 
 target_include_directories(lrep_utils PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

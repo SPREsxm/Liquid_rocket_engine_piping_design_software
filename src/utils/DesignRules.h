@@ -7,6 +7,7 @@
 class BlockScene;
 struct NetworkSolution;
 struct SolverSettings;
+struct ThermalStressResult;
 
 struct DesignCheckResult {
     enum Severity { Pass, Warning, Error };
@@ -43,3 +44,11 @@ DesignCheckResult runDesignChecks(
     const NetworkSolution& solution,
     const SolverSettings& settings,
     double maxPressureDropPa = -1.0);
+
+// Extended version that also checks pipe structural stress
+DesignCheckResult runDesignChecks(
+    BlockScene* scene,
+    const NetworkSolution& solution,
+    const SolverSettings& settings,
+    double maxPressureDropPa,
+    const ThermalStressResult& thermalStress);

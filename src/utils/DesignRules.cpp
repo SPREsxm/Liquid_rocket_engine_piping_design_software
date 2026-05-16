@@ -2,6 +2,7 @@
 #include "PipeScheduleDatabase.h"
 #include "PropellantProperties.h"
 #include "NetworkSolver.h"
+#include "ThermalSolver.h"
 #include "ui/graphics/BlockScene.h"
 #include "ui/graphics/BlockItem.h"
 #include "ui/graphics/ConnectionItem.h"
@@ -242,5 +243,41 @@ DesignCheckResult runDesignChecks(
     checkWallThickness(scene, solution, settings, result);
     checkPressureDropBudget(scene, solution, maxPressureDropPa, result);
 
+    return result;
+}
+
+// ─── Pipe structure stress check ──────────────────────────────────
+
+static void checkPipeStress(const ThermalStressResult& tsr,
+                             DesignCheckResult& result)
+{
+    for (const auto& te : tsr.edges) {
+        if (te.safetyFactor < 1.5 && te.safetyFactor >= 1.0) {
+            result.items.append({DesignCheckResult::Warning, "Pipe Stress (FSI)",
+                QString(), te.sourceUuid,
+                QString("Safety factor %1 < 1.5 (material: %2)")
+                    .arg(te.safetyFactor, 0, 'f', 2).arg(te.materialUsed),
+                te.safetyFactor, 1.5, "—"});
+        } else if (te.safetyFactor < 1.0) {
+            result.items.append({DesignCheckResult::Error, "Pipe Stress (FSI)",
+                QString(), te.sourceUuid,
+                QString("YIELD EXCEEDED: safety factor %1 (material: %2, σ_vm=%3 MPa)")
+                    .arg(te.safetyFactor, 0, 'f', 2)
+                    .arg(te.materialUsed)
+                    .arg(te.vonMisesStress_Pa / 1.0e6, 0, 'f', 1),
+                te.safetyFactor, 1.0, "—"});
+        }
+    }
+}
+
+DesignCheckResult runDesignChecks(
+    BlockScene* scene,
+    const NetworkSolution& solution,
+    const SolverSettings& settings,
+    double maxPressureDropPa,
+    const ThermalStressResult& tsr)
+{
+    DesignCheckResult result = runDesignChecks(scene, solution, settings, maxPressureDropPa);
+    checkPipeStress(tsr, result);
     return result;
 }
