@@ -10,8 +10,7 @@
 
 namespace {
 
-// Temperature-dependent thermal conductivity of 304L SS (W/(m·K))
-// Approximate: 15 W/(m·K) at 300K, ~18 at 500K, ~21 at 800K
+// Fluid thermal conductivity lookup (W/(m·K))
 inline double fluidThermalConductivity_WpmK(const SolverSettings& s)
 {
     // Approximate values for common rocket propellants at ~200K
@@ -92,26 +91,16 @@ ThermalStressResult computeThermalStress(
         te.reynoldsNumber = Re;
         te.prandtlNumber = Pr;
 
-        if (Re > 4000.0 && Pr > 0.5) {
+        if (Re > 2300.0 && Pr > 0.5) {
             // Gnielinski correlation (valid: 2300 ≤ Re ≤ 5e6, 0.5 ≤ Pr ≤ 2000)
-            double f = FluidDynamics::calculateColebrookWhiteFrictionFactor(Re, 4.5e-5 / D, D);
+            double f = FluidDynamics::calculateColebrookWhiteFrictionFactor(
+                Re, settings.pipeRoughness / D, D);
             double f8 = f / 8.0;
             double sqrt_f8 = std::sqrt(f8);
             double Pr23 = std::pow(Pr, 2.0/3.0);
             double numer = f8 * (Re - 1000.0) * Pr;
             double denom = 1.0 + 12.7 * sqrt_f8 * (Pr23 - 1.0);
             te.nusseltNumber = (denom > 0.0) ? numer / denom : 0.0;
-        } else if (Re > 2300.0) {
-            // Transition: linear interpolation between laminar and turbulent
-            double NuLam = 4.36; // constant heat flux
-            double f = FluidDynamics::calculateColebrookWhiteFrictionFactor(4000.0, 4.5e-5 / D, D);
-            double f8 = f / 8.0;
-            double Pr23 = std::pow(Pr, 2.0/3.0);
-            double numer = f8 * (4000.0 - 1000.0) * Pr;
-            double denom = 1.0 + 12.7 * std::sqrt(f8) * (Pr23 - 1.0);
-            double NuTurb = (denom > 0.0) ? numer / denom : 0.0;
-            double frac = (Re - 2300.0) / 1700.0;
-            te.nusseltNumber = NuLam + frac * (NuTurb - NuLam);
         } else if (Re > 0.0) {
             te.nusseltNumber = 4.36; // laminar, constant heat flux
         }

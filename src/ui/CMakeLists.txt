@@ -5,6 +5,8 @@ add_library(lrep_ui STATIC
     PreferencesDialog.cpp
     SolverResultsPanel.h
     SolverResultsPanel.cpp
+    ../app/Application.h
+    ../app/Application.cpp
 )
 
 target_include_directories(lrep_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

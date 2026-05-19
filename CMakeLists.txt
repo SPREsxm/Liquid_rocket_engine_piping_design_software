@@ -10,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Find Qt 6 (relax minimum to 6.2 for wider compatibility; 6.8 recommended)
-find_package(Qt6 6.2 QUIET COMPONENTS Widgets Svg PrintSupport)
+find_package(Qt6 6.2 QUIET COMPONENTS Widgets Svg PrintSupport LinguistTools)
 if(NOT Qt6_FOUND)
     message(WARNING "Qt6 not found. Build will be configured but cannot compile GUI code.")
     message(WARNING "Install Qt 6.x and set CMAKE_PREFIX_PATH to the Qt install directory.")
@@ -41,6 +41,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 
 add_subdirectory(src)
+add_subdirectory(translations)
 
 # Tests (optional — require Catch2)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")

@@ -46,6 +46,8 @@ public:
 
     QAction* action(ActionId id) const;
 
+    void retranslate();
+
 private:
     void createAll();
     QAction* add(ActionId id, const QString& text,

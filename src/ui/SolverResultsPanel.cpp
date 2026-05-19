@@ -35,6 +35,66 @@ void SolverResultsPanel::setupUi()
 
     m_tabWidget = new QTabWidget;
 
+    // ═══ Summary tab (first — landing page after analysis) ═══
+    {
+        m_summaryTab = new QWidget;
+        auto* sumLayout = new QVBoxLayout(m_summaryTab);
+        sumLayout->setContentsMargins(12, 12, 12, 12);
+        sumLayout->setSpacing(6);
+
+        // Section A — System Overview
+        auto* secALabel = new QLabel(tr("<b>System Overview</b>"));
+        sumLayout->addWidget(secALabel);
+
+        m_summaryStatus = new QLabel(tr("Run analysis to see results."));
+        m_summaryStatus->setWordWrap(true);
+        sumLayout->addWidget(m_summaryStatus);
+
+        m_summaryDp = new QLabel(tr("Total ΔP:  —"));
+        sumLayout->addWidget(m_summaryDp);
+
+        m_summaryWeight = new QLabel(tr("System Mass:  —"));
+        sumLayout->addWidget(m_summaryWeight);
+
+        m_summaryThrust = new QLabel(tr("Thrust / Isp:  —"));
+        sumLayout->addWidget(m_summaryThrust);
+
+        auto* sepA = new QFrame; sepA->setFrameShape(QFrame::HLine);
+        sumLayout->addWidget(sepA);
+
+        // Section B — Design Rules
+        auto* secBLabel = new QLabel(tr("<b>Design Rules</b>"));
+        sumLayout->addWidget(secBLabel);
+
+        m_summaryFlowVel = new QLabel(tr("Flow Velocity:  —"));
+        sumLayout->addWidget(m_summaryFlowVel);
+        m_summaryCavitation = new QLabel(tr("Cavitation (NPSH):  —"));
+        sumLayout->addWidget(m_summaryCavitation);
+        m_summaryWallThick = new QLabel(tr("Wall Thickness:  —"));
+        sumLayout->addWidget(m_summaryWallThick);
+        m_summaryPipeStress = new QLabel(tr("Pipe Stress:  —"));
+        sumLayout->addWidget(m_summaryPipeStress);
+        m_summaryDpBudget = new QLabel(tr("ΔP Budget:  —"));
+        sumLayout->addWidget(m_summaryDpBudget);
+
+        auto* sepB = new QFrame; sepB->setFrameShape(QFrame::HLine);
+        sumLayout->addWidget(sepB);
+
+        // Section C — Thermal / Structural
+        auto* secCLabel = new QLabel(tr("<b>Thermal / Structure</b>"));
+        sumLayout->addWidget(secCLabel);
+
+        m_summarySafetyFactor = new QLabel(tr("Min Safety Factor:  —"));
+        sumLayout->addWidget(m_summarySafetyFactor);
+        m_summaryHeatTransfer = new QLabel(tr("Heat Transfer Coeff.:  —"));
+        sumLayout->addWidget(m_summaryHeatTransfer);
+        m_summaryYieldExceeded = new QLabel(tr("Edges Yielded:  —"));
+        sumLayout->addWidget(m_summaryYieldExceeded);
+
+        sumLayout->addStretch();
+        m_tabWidget->addTab(m_summaryTab, tr("Summary"));
+    }
+
     // ── Node results table ──────────────────────────
     m_nodeTable = new QTableWidget(0, 6);
     m_nodeTable->setHorizontalHeaderLabels({
@@ -258,6 +318,28 @@ void SolverResultsPanel::setupUi()
     thermLayout->addWidget(m_thermalTable);
     m_tabWidget->addTab(m_thermalTab, tr("Thermal/Stress"));
 
+    // ── BOM tab ───────────────────────────────────────
+    {
+        m_bomTab = new QWidget;
+        auto* bomLayout = new QVBoxLayout(m_bomTab);
+
+        m_bomTable = new QTableWidget(0, 5);
+        m_bomTable->setHorizontalHeaderLabels({
+            tr("Category"), tr("Component"), tr("Specification"),
+            tr("Quantity"), tr("Weight (kg)")
+        });
+        m_bomTable->horizontalHeader()->setStretchLastSection(true);
+        m_bomTable->setAlternatingRowColors(true);
+        m_bomTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        bomLayout->addWidget(m_bomTable);
+
+        m_bomTotalWeight = new QLabel(tr("Total: — kg"));
+        m_bomTotalWeight->setStyleSheet("font-weight: bold; padding: 4px;");
+        bomLayout->addWidget(m_bomTotalWeight);
+
+        m_tabWidget->addTab(m_bomTab, tr("BOM"));
+    }
+
     // ── Transient animation (embedded in Transient tab) ──
     {
         auto* animWidget = new QWidget;
@@ -290,8 +372,43 @@ void SolverResultsPanel::setupUi()
         m_tabWidget->addTab(animWidget, tr("Transient Animation"));
     }
 
+    // ── Blowdown tab ─────────────────────────────────
+    {
+        m_blowdownTab = new QWidget;
+        auto* bdLayout = new QVBoxLayout(m_blowdownTab);
+
+        m_blowdownMetricCombo = new QComboBox;
+        m_blowdownMetricCombo->addItem(tr("Pressure vs Time"),    QStringLiteral("pressure"));
+        m_blowdownMetricCombo->addItem(tr("Flow Rate vs Time"),   QStringLiteral("flow"));
+        m_blowdownMetricCombo->addItem(tr("Temperature vs Time"), QStringLiteral("temperature"));
+        connect(m_blowdownMetricCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, &SolverResultsPanel::onBlowdownMetricChanged);
+        bdLayout->addWidget(m_blowdownMetricCombo);
+
+        m_blowdownChart = new PaintChartWidget;
+        m_blowdownChart->setChartType(PaintChartWidget::LineChart);
+        m_blowdownChart->setXLabel(tr("Time (s)"));
+        m_blowdownChart->setYLabel(tr("Pressure (Pa)"));
+        m_blowdownChart->setTitle(tr("Blowdown — Pressure vs Time"));
+        bdLayout->addWidget(m_blowdownChart, 1);
+
+        m_tabWidget->addTab(m_blowdownTab, tr("Blowdown"));
+    }
+
     // Timer for animation
     m_transientTimer = new QTimer(this);
+
+    // Reorder tabs: Summary(0) → Design Checks → Node Results → Edge Results →
+    // Thermal/Stress → Optimization → BOM → Thrust Chamber → Sensitivity →
+    // Path Profile → Transient Results → Transient Animation → Blowdown
+    {
+        auto* bar = m_tabWidget->tabBar();
+        bar->moveTab(5, 1);   // Design Checks → pos 1
+        bar->moveTab(9, 4);   // Thermal/Stress → pos 4
+        bar->moveTab(9, 5);   // Optimization → pos 5
+        bar->moveTab(10, 6);  // BOM → pos 6
+        bar->moveTab(7, 10);  // Transient Results → pos 10
+    }
 
     layout->addWidget(m_tabWidget);
 
@@ -362,6 +479,31 @@ void SolverResultsPanel::setResults(const NetworkSolution& solution)
 
     // ── Populate thrust tab ─────────────────────────
     populateThrustTab(solution);
+
+    // ── Update summary tab ──────────────────────────
+    {
+        if (solution.converged) {
+            m_summaryStatus->setText(tr("✓ Converged"));
+            m_summaryStatus->setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 14px;");
+        } else {
+            m_summaryStatus->setText(tr("✗ Not Converged"));
+            m_summaryStatus->setStyleSheet("color: #C62828; font-weight: bold; font-size: 14px;");
+        }
+        m_summaryDp->setText(tr("Total ΔP:  %1 MPa")
+            .arg(solution.totalPressureDrop / 1.0e6, 0, 'f', 3));
+        if (solution.hasThrustResults) {
+            m_summaryThrust->setText(tr("Thrust / Isp:  %1 kN / %2 s")
+                .arg(solution.thrustResult.thrust_N / 1000.0, 0, 'f', 1)
+                .arg(solution.thrustResult.specificImpulse_s, 0, 'f', 1));
+        } else {
+            m_summaryThrust->setText(tr("Thrust / Isp:  —"));
+        }
+    }
+
+    // Switch to summary tab after all data is populated (MainWindow calls
+    // subsequent setDesignCheckResults, setBomData, setThermalStressResults
+    // after this, which update their summary sections in place).
+    m_tabWidget->setCurrentWidget(m_summaryTab);
 
     m_lastSolution = solution;
     m_exportBtn->setEnabled(true);
@@ -519,14 +661,73 @@ void SolverResultsPanel::setDesignCheckResults(const DesignCheckResult& result)
     }
     m_designCheckTable->resizeColumnsToContents();
 
-    if (!result.items.isEmpty())
-        m_tabWidget->setCurrentWidget(m_designCheckTable);
+    // Update summary — design rules section
+    auto countByRule = [&](const QString& rule) -> QPair<int,int> {
+        int errs = 0, warns = 0;
+        for (const auto& item : result.items) {
+            if (item.ruleName != rule) continue;
+            if (item.severity == DesignCheckResult::Error) ++errs;
+            else if (item.severity == DesignCheckResult::Warning) ++warns;
+        }
+        return {errs, warns};
+    };
+
+    auto fmt = [](int e, int w) {
+        return QString("%1 ❌ / %2 ⚠").arg(e).arg(w);
+    };
+
+    auto [fvE, fvW] = countByRule("Flow Velocity");
+    m_summaryFlowVel->setText(tr("Flow Velocity:  %1").arg(fmt(fvE, fvW)));
+
+    auto [cvE, cvW] = countByRule("Cavitation (NPSH)");
+    m_summaryCavitation->setText(tr("Cavitation (NPSH):  %1").arg(fmt(cvE, cvW)));
+
+    auto [wtE, wtW] = countByRule("Wall Thickness (ASME B31.3)");
+    m_summaryWallThick->setText(tr("Wall Thickness:  %1").arg(fmt(wtE, wtW)));
+
+    auto [psE, psW] = countByRule("Pipe Stress (FSI)");
+    m_summaryPipeStress->setText(tr("Pipe Stress:  %1").arg(fmt(psE, psW)));
+
+    auto [dpE, dpW] = countByRule("Pressure Drop Budget");
+    m_summaryDpBudget->setText(tr("ΔP Budget:  %1").arg(fmt(dpE, dpW)));
+
+    // Update overall status
+    int totalErrs = result.errorCount();
+    int totalWarns = result.warningCount();
+    if (totalErrs > 0) {
+        m_summaryStatus->setText(tr("✗ Design Violations (%1 errors, %2 warnings)").arg(totalErrs).arg(totalWarns));
+        m_summaryStatus->setStyleSheet("color: #C62828; font-weight: bold; font-size: 14px;");
+    } else if (totalWarns > 0) {
+        m_summaryStatus->setText(tr("⚠ Warnings Present (%1 warnings)").arg(totalWarns));
+        m_summaryStatus->setStyleSheet("color: #E65100; font-weight: bold; font-size: 14px;");
+    } else if (!result.items.isEmpty()) {
+        m_summaryStatus->setText(tr("✓ All Checks Passed"));
+        m_summaryStatus->setStyleSheet("color: #2E7D32; font-weight: bold; font-size: 14px;");
+    }
 }
 
 void SolverResultsPanel::setBomData(const BomResult& bom)
 {
     m_bomResult = bom;
     m_hasBom = !bom.lines.isEmpty();
+
+    // Populate BOM table
+    m_bomTable->setRowCount(bom.lines.size());
+    for (int i = 0; i < bom.lines.size(); ++i) {
+        const auto& line = bom.lines[i];
+        m_bomTable->setItem(i, 0, new QTableWidgetItem(line.category));
+        m_bomTable->setItem(i, 1, new QTableWidgetItem(line.displayName));
+        m_bomTable->setItem(i, 2, new QTableWidgetItem(line.specification));
+        m_bomTable->setItem(i, 3, new QTableWidgetItem(
+            QString::number(line.quantity) + " " + line.unit));
+        m_bomTable->setItem(i, 4, new QTableWidgetItem(
+            QString::number(line.totalWeight, 'f', 2)));
+    }
+    m_bomTable->resizeColumnsToContents();
+    m_bomTotalWeight->setText(tr("Total: %1 kg").arg(bom.totalWeight, 0, 'f', 2));
+
+    // Update summary weight
+    m_summaryWeight->setText(tr("System Mass:  %1 kg").arg(bom.totalWeight, 0, 'f', 1));
 }
 
 void SolverResultsPanel::clearResults()
@@ -534,6 +735,7 @@ void SolverResultsPanel::clearResults()
     m_nodeTable->setRowCount(0);
     m_edgeTable->setRowCount(0);
     m_designCheckTable->setRowCount(0);
+    m_bomTable->setRowCount(0);
     m_transientSummary->clear();
     m_hasBom = false;
     m_bomResult = BomResult{};
@@ -549,6 +751,25 @@ void SolverResultsPanel::clearResults()
     m_transientPlayBtn->setEnabled(false);
     m_transientProgress->setEnabled(false);
     m_transientProgress->setMaximum(0);
+
+    // Reset summary labels
+    m_summaryStatus->setText(tr("Run analysis to see results."));
+    m_summaryStatus->setStyleSheet("");
+    m_summaryDp->setText(tr("Total ΔP:  —"));
+    m_summaryWeight->setText(tr("System Mass:  —"));
+    m_summaryThrust->setText(tr("Thrust / Isp:  —"));
+    m_summaryFlowVel->setText(tr("Flow Velocity:  —"));
+    m_summaryCavitation->setText(tr("Cavitation (NPSH):  —"));
+    m_summaryWallThick->setText(tr("Wall Thickness:  —"));
+    m_summaryPipeStress->setText(tr("Pipe Stress:  —"));
+    m_summaryDpBudget->setText(tr("ΔP Budget:  —"));
+    m_summarySafetyFactor->setText(tr("Min Safety Factor:  —"));
+    m_summarySafetyFactor->setStyleSheet("");
+    m_summaryHeatTransfer->setText(tr("Heat Transfer Coeff.:  —"));
+    m_summaryYieldExceeded->setText(tr("Edges Yielded:  —"));
+    m_summaryYieldExceeded->setStyleSheet("");
+    m_bomTotalWeight->setText(tr("Total: — kg"));
+    m_tabWidget->setCurrentWidget(m_summaryTab);
 }
 
 // ── Sensitivity Analysis ──────────────────────────────────────────
@@ -834,4 +1055,95 @@ void SolverResultsPanel::setThermalStressResults(const ThermalStressResult& resu
         .arg(result.avgHeatTransferCoeff, 0, 'f', 1);
 
     m_thermalSummary->setText(summary);
+
+    // Update summary — thermal / structural section
+    m_summarySafetyFactor->setText(tr("Min Safety Factor:  %1")
+        .arg(result.minSafetyFactor < 900.0
+             ? QString::number(result.minSafetyFactor, 'f', 2) : QStringLiteral("—")));
+    if (result.minSafetyFactor < 1.5 && result.minSafetyFactor < 900.0) {
+        m_summarySafetyFactor->setStyleSheet("color: #C62828;");
+    } else if (result.minSafetyFactor < 900.0) {
+        m_summarySafetyFactor->setStyleSheet("color: #2E7D32;");
+    }
+
+    // Heat transfer coefficient range
+    if (!result.edges.isEmpty()) {
+        double hMin = 1e9, hMax = 0.0;
+        for (const auto& te : result.edges) {
+            if (te.heatTransferCoeff_Wpm2K < hMin) hMin = te.heatTransferCoeff_Wpm2K;
+            if (te.heatTransferCoeff_Wpm2K > hMax) hMax = te.heatTransferCoeff_Wpm2K;
+        }
+        m_summaryHeatTransfer->setText(tr("Heat Transfer Coeff.:  %1 — %2 W/(m²·K)")
+            .arg(hMin, 0, 'f', 1).arg(hMax, 0, 'f', 1));
+    }
+
+    m_summaryYieldExceeded->setText(tr("Edges Yielded:  %1 / %2")
+        .arg(result.edgesWithYieldExceeded).arg(result.edges.size()));
+    if (result.edgesWithYieldExceeded > 0) {
+        m_summaryYieldExceeded->setStyleSheet("color: #C62828;");
+    }
+}
+
+void SolverResultsPanel::setBlowdownResults(const BlowdownResult& result)
+{
+    m_blowdownResult = result;
+    m_exportBtn->setEnabled(true);
+    m_exportReportBtn->setEnabled(true);
+
+    // Trigger initial chart display
+    onBlowdownMetricChanged();
+}
+
+void SolverResultsPanel::onBlowdownMetricChanged()
+{
+    if (!m_blowdownMetricCombo || !m_blowdownChart)
+        return;
+
+    const auto& result = m_blowdownResult;
+    QString metric = m_blowdownMetricCombo->currentData().toString();
+    if (result.sensorTraces.isEmpty()) return;
+
+    // Build multi-series data: one series per sensor
+    QVector<QVector<QPointF>> allSeries;
+    QStringList labels;
+    QString yLabel;
+
+    for (const auto& trace : result.sensorTraces) {
+        QVector<QPointF> series;
+        series.reserve(trace.times.size());
+
+        QVector<double> values;
+        if (metric == "flow") {
+            values = trace.flowRates;
+            yLabel = tr("Mass Flow Rate (kg/s)");
+        } else if (metric == "temperature") {
+            values = trace.temperatures;
+            yLabel = tr("Temperature (K)");
+        } else {
+            values = trace.pressures;
+            yLabel = tr("Pressure (Pa)");
+        }
+
+        for (int i = 0; i < qMin(trace.times.size(), values.size()); ++i)
+            series.append(QPointF(trace.times[i], values[i]));
+
+        if (!series.isEmpty()) {
+            allSeries.append(series);
+            labels.append(trace.blockLabel.isEmpty() ? trace.blockTypeId : trace.blockLabel);
+        }
+    }
+
+    m_blowdownChart->setMultiSeries(allSeries, labels);
+    m_blowdownChart->setXLabel(tr("Time (s)"));
+    m_blowdownChart->setYLabel(yLabel);
+
+    QString title;
+    if (metric == "flow")
+        title = tr("Blowdown — Flow Rate vs Time");
+    else if (metric == "temperature")
+        title = tr("Blowdown — Temperature vs Time");
+    else
+        title = tr("Blowdown — Pressure vs Time");
+    m_blowdownChart->setTitle(title);
+    m_blowdownChart->update();
 }

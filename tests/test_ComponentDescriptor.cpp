@@ -81,3 +81,53 @@ TEST_CASE("All 13 built-in descriptors are valid") {
         REQUIRE(!d.displayName.isEmpty());
     }
 }
+
+TEST_CASE("FuelOutlet descriptor is valid") {
+    auto d = ComponentDescriptor::createFuelOutlet();
+
+    REQUIRE(d.isValid());
+    REQUIRE(d.typeId == "chamber.fuelOutlet");
+    REQUIRE(d.category == "Combustion");
+    REQUIRE(d.displayName == "Fuel Outlet");
+    REQUIRE(d.inputPorts.size() == 1);
+    REQUIRE(d.inputPorts[0].id == "inlet");
+    REQUIRE(d.inputPorts[0].direction == PortDirection::Input);
+    REQUIRE(d.outputPorts.empty());
+
+    bool hasFlowRate = false, hasEnvPressure = false;
+    for (const auto& p : d.properties) {
+        if (p.id == "outletFlowRate") {
+            hasFlowRate = true;
+            REQUIRE(p.defaultValue.toDouble() == 30.0);
+            REQUIRE(p.unit == "kg/s");
+        }
+        if (p.id == "outletEnvironmentPressure") {
+            hasEnvPressure = true;
+            REQUIRE(p.defaultValue.toDouble() == 7.0e6);
+            REQUIRE(p.unit == "Pa");
+        }
+    }
+    REQUIRE(hasFlowRate);
+    REQUIRE(hasEnvPressure);
+}
+
+TEST_CASE("OxidizerOutlet descriptor is valid") {
+    auto d = ComponentDescriptor::createOxidizerOutlet();
+
+    REQUIRE(d.isValid());
+    REQUIRE(d.typeId == "chamber.oxidizerOutlet");
+    REQUIRE(d.category == "Combustion");
+    REQUIRE(d.displayName == "Oxidizer Outlet");
+    REQUIRE(d.inputPorts.size() == 1);
+    REQUIRE(d.inputPorts[0].id == "inlet");
+    REQUIRE(d.outputPorts.empty());
+
+    bool hasFlowRate = false;
+    for (const auto& p : d.properties) {
+        if (p.id == "outletFlowRate") {
+            hasFlowRate = true;
+            REQUIRE(p.defaultValue.toDouble() == 80.0);
+        }
+    }
+    REQUIRE(hasFlowRate);
+}

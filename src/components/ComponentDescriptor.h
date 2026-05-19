@@ -83,4 +83,8 @@ struct ComponentDescriptor {
     static ComponentDescriptor createReliefValve();
     static ComponentDescriptor createBurstDisk();
     static ComponentDescriptor createFlowMeter();
+
+    // ── 2.6 燃烧室出口边界 ──
+    static ComponentDescriptor createFuelOutlet();
+    static ComponentDescriptor createOxidizerOutlet();
 };

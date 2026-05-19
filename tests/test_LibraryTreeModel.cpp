@@ -41,7 +41,7 @@ TEST_CASE("LibraryTreeModel leaf items have TypeIdRole") {
             ++leafCount;
         }
     }
-    REQUIRE(leafCount == 48);
+    REQUIRE(leafCount == 50);
 }
 
 TEST_CASE("LibraryTreeModel known typeIds present") {

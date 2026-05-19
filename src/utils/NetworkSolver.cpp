@@ -9,6 +9,7 @@
 #include "ResistanceCoefficients.h"
 #include "SSTTurbulence.h"
 #include "PropellantProperties.h"
+#include "PipeScheduleDatabase.h"
 
 #include <QQueue>
 #include <QSet>
@@ -29,6 +30,15 @@ constexpr double kDefaultViscosity = 1.96e-4;
 double getProp(BlockItem* b, const QString& id, double fallback) {
     QVariant v = b->propertyValue(id);
     if (v.isValid() && v.toDouble() != 0.0) return v.toDouble();
+    // Fallback: resolve diameter from NPS/schedule via PipeScheduleDatabase
+    if (id == "diameter") {
+        double nps = b->propertyValue("nps").toDouble();
+        QString sch = b->propertyValue("schedule").toString();
+        if (nps > 0.0 && !sch.isEmpty()) {
+            auto id_mm = PipeScheduleDatabase::instance().innerDiameter(nps, sch);
+            if (id_mm.has_value()) return id_mm.value() / 1000.0; // mm→m
+        }
+    }
     return fallback;
 }
 
@@ -294,6 +304,26 @@ QList<BlockItem*> findInlets(const Graph& g) {
     return inlets;
 }
 
+bool isOutletBlock(BlockItem* b) {
+    if (!b) return false;
+    QVariant envP = b->propertyValue("outletEnvironmentPressure");
+    return envP.isValid() && envP.toDouble() > 0.0;
+}
+
+double getInletPressure(BlockItem* b, double fallback) {
+    QVariant v = b->propertyValue("currentInletPressure");
+    if (v.isValid() && v.toDouble() > 0.0) return v.toDouble();
+    return fallback;
+}
+QList<BlockItem*> findOutlets(const Graph& g) {
+    QList<BlockItem*> outlets;
+    for (auto* b : g.nodes) {
+        if (isOutletBlock(b) && g.outEdges.value(b).isEmpty())
+            outlets.append(b);
+    }
+    return outlets;
+}
+
 // Build NodeState list and compute total pressure drop
 // Compute thrust results from a nozzle block's properties and mass flow
 ThrustAnalysis::ThrustResult computeNozzleThrust(BlockItem* nozzleBlock, double massFlow)
@@ -469,7 +499,7 @@ NetworkSolution solveGraph(const Graph& g,
 
     double remainingFlow = inletMassFlowKgPerS;
     for (auto* inlet : inlets) {
-        pressure[inlet] = inletPressurePa;
+        pressure[inlet] = getInletPressure(inlet, inletPressurePa);
         outflow[inlet] = remainingFlow / inlets.size();
         visited.insert(inlet);
         queue.enqueue(inlet);
@@ -545,6 +575,16 @@ NetworkSolution solveGraph(const Graph& g,
                 outflow[dst] = flowPerEdge;
                 queue.enqueue(dst);
             }
+        }
+    }
+
+    // Outlet boundary condition: clamp outlet node pressures
+    {
+        QList<BlockItem*> outlets = findOutlets(g);
+        for (auto* outlet : outlets) {
+            double envP = getProp(outlet, "outletEnvironmentPressure", 0.0);
+            if (envP > 0.0)
+                pressure[outlet] = envP;
         }
     }
 
@@ -724,7 +764,7 @@ NetworkSolution solveHardyCross(const Graph& g,
         totalOutflow[b] = 0.0;
     }
     for (auto* inlet : inlets)
-        pressure[inlet] = inletPressurePa;
+        pressure[inlet] = getInletPressure(inlet, inletPressurePa);
 
     // Forward pressure computation (BFS order from inlets)
     QQueue<BlockItem*> queue;
@@ -763,6 +803,16 @@ NetworkSolution solveHardyCross(const Graph& g,
                 visited.insert(dst);
                 queue.enqueue(dst);
             }
+        }
+    }
+
+    // Outlet boundary condition: clamp outlet node pressures
+    {
+        QList<BlockItem*> outlets = findOutlets(g);
+        for (auto* outlet : outlets) {
+            double envP = getProp(outlet, "outletEnvironmentPressure", 0.0);
+            if (envP > 0.0)
+                pressure[outlet] = envP;
         }
     }
 
@@ -839,7 +889,7 @@ NetworkSolution solveMatrix(const Graph& g,
     // Iterative Gauss-Seidel: nodal mass balance + pressure continuity
     QVector<double> nodePressure(nNodes, 0.0);
     for (int i : inletNodeIdx)
-        nodePressure[i] = inletPressurePa;
+        nodePressure[i] = getInletPressure(g.nodes[i], inletPressurePa);
 
     for (int iter = 0; iter < maxIter; ++iter) {
         double maxError = 0.0;
@@ -915,6 +965,14 @@ NetworkSolution solveMatrix(const Graph& g,
         }
 
         if (maxError < tol) break;
+    }
+
+    // Outlet boundary condition: clamp outlet node pressures
+    for (int i = 0; i < nNodes; ++i) {
+        BlockItem* b = g.nodes[i];
+        double envP = getProp(b, "outletEnvironmentPressure", 0.0);
+        if (envP > 0.0 && g.outEdges.value(b).isEmpty())
+            nodePressure[i] = envP;
     }
 
     // Build solution

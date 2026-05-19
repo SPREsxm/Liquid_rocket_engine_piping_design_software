@@ -1,7 +1,4 @@
-add_executable(LiquidRocketPiping
-    Application.h
-    Application.cpp
-)
+add_executable(LiquidRocketPiping)
 
 target_include_directories(LiquidRocketPiping PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(LiquidRocketPiping PRIVATE lrep_ui lrep_components lrep_utils lrep_core Qt6::PrintSupport)
@@ -29,3 +26,13 @@ if(Qt6_FOUND AND Qt6_DIR)
         )
     endif()
 endif()
+
+# Copy translation .qm files to output directory
+add_custom_command(TARGET LiquidRocketPiping POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "$<TARGET_FILE_DIR:LiquidRocketPiping>/translations"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_BINARY_DIR}/translations/lrep_zh_CN.qm"
+        "$<TARGET_FILE_DIR:LiquidRocketPiping>/translations/"
+    COMMENT "Copying translation files to output..."
+)

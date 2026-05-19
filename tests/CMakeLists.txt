@@ -37,6 +37,7 @@ add_executable(lrep_tests
     test_PathProfile.cpp
     test_PipeOptimizer.cpp
     test_ThermalSolver.cpp
+    test_BlowdownSolver.cpp
 )
 
 target_include_directories(lrep_tests PRIVATE "${CMAKE_SOURCE_DIR}/src")

@@ -16,6 +16,7 @@
 #include "utils/TransientSolver.h"
 #include "utils/PipeOptimizer.h"
 #include "utils/ThermalSolver.h"
+#include "utils/BlowdownSolver.h"
 
 #include <QTimer>
 
@@ -62,6 +63,9 @@ public:
     // Thermal / Stress
     void setThermalStressResults(const ThermalStressResult& result);
 
+    // Blowdown transient
+    void setBlowdownResults(const BlowdownResult& result);
+
 private slots:
     void onExportCsv();
     void onExportReport();
@@ -69,6 +73,7 @@ private slots:
     void onComputeTornado();
     void onTransientPlayPause();
     void onTransientFrame();
+    void onBlowdownMetricChanged();
 
 signals:
     void exportCsvRequested();
@@ -130,6 +135,26 @@ private:
     QTableWidget* m_optimizationTable = nullptr;
     QLabel* m_optimizationSummary = nullptr;
 
+    // Summary tab
+    QWidget* m_summaryTab = nullptr;
+    QLabel* m_summaryStatus = nullptr;
+    QLabel* m_summaryDp = nullptr;
+    QLabel* m_summaryWeight = nullptr;
+    QLabel* m_summaryThrust = nullptr;
+    QLabel* m_summaryFlowVel = nullptr;
+    QLabel* m_summaryCavitation = nullptr;
+    QLabel* m_summaryWallThick = nullptr;
+    QLabel* m_summaryPipeStress = nullptr;
+    QLabel* m_summaryDpBudget = nullptr;
+    QLabel* m_summarySafetyFactor = nullptr;
+    QLabel* m_summaryHeatTransfer = nullptr;
+    QLabel* m_summaryYieldExceeded = nullptr;
+
+    // BOM tab
+    QWidget* m_bomTab = nullptr;
+    QTableWidget* m_bomTable = nullptr;
+    QLabel* m_bomTotalWeight = nullptr;
+
     // Thermal / Stress tab
     QWidget* m_thermalTab = nullptr;
     QTableWidget* m_thermalTable = nullptr;
@@ -144,4 +169,10 @@ private:
     QPushButton* m_transientPlayBtn = nullptr;
     PaintChartWidget* m_transientAnimChart = nullptr;
     bool m_transientPlaying = false;
+
+    // Blowdown tab
+    QWidget* m_blowdownTab = nullptr;
+    QComboBox* m_blowdownMetricCombo = nullptr;
+    PaintChartWidget* m_blowdownChart = nullptr;
+    BlowdownResult m_blowdownResult;
 };

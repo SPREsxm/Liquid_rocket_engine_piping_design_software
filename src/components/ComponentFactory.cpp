@@ -135,4 +135,8 @@ void ComponentFactory::registerBuiltins()
     registerComponent(ComponentDescriptor::createReliefValve());
     registerComponent(ComponentDescriptor::createBurstDisk());
     registerComponent(ComponentDescriptor::createFlowMeter());
+
+    // ── 2.6 燃烧室出口边界 ──
+    registerComponent(ComponentDescriptor::createFuelOutlet());
+    registerComponent(ComponentDescriptor::createOxidizerOutlet());
 }

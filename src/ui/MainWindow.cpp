@@ -12,9 +12,11 @@
 #include "ui/properties/PropertyEditor.h"
 #include "PreferencesDialog.h"
 #include "SolverResultsPanel.h"
+#include "app/Application.h"
 #include "utils/NetworkValidator.h"
 #include "utils/NetworkSolver.h"
 #include "utils/TransientSolver.h"
+#include "utils/BlowdownSolver.h"
 #include "utils/Benchmark.h"
 #include "utils/GridRefinement.h"
 #include "utils/DesignRules.h"
@@ -124,6 +126,62 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow()
 {
     saveSettings();
+}
+
+void MainWindow::changeEvent(QEvent* event)
+{
+    if (event->type() == QEvent::LanguageChange)
+        retranslateUi();
+    QMainWindow::changeEvent(event);
+}
+
+void MainWindow::retranslateUi()
+{
+    // Menus
+    m_fileMenu->setTitle(tr("&File"));
+    m_editMenu->setTitle(tr("&Edit"));
+    m_viewMenu->setTitle(tr("&View"));
+    m_toolsMenu->setTitle(tr("&Tools"));
+    m_helpMenu->setTitle(tr("&Help"));
+    m_recentFilesMenu->setTitle(tr("&Recent Files"));
+
+    // Actions
+    m_actionManager->retranslate();
+
+    // Toolbar
+    m_mainToolBar->setWindowTitle(tr("Main"));
+    m_inletPressureLabel->setText(tr(" P_in:"));
+    m_inletFlowLabel->setText(tr(" ṁ:"));
+    m_fluidTypeLabel->setText(tr(" Fluid:"));
+    m_maxDpLabel->setText(tr(" ΔP_max:"));
+    m_inletPressureSpin->setToolTip(tr("Inlet total pressure (MPa)"));
+    m_inletFlowSpin->setToolTip(tr("Inlet mass flow rate (kg/s)"));
+    m_fluidTypeCombo->setToolTip(tr("Working fluid — sets density and viscosity defaults"));
+    m_maxPressureDropSpin->setSpecialValueText(tr("Off"));
+    m_maxPressureDropSpin->setToolTip(tr("Max allowed pressure drop (0 = disabled)"));
+
+    // Status bar
+    m_statusLabel->setText(tr("Ready"));
+
+    // Dock titles
+    m_libraryDock->setWindowTitle(tr("Component Library"));
+    m_propertyDock->setWindowTitle(tr("Properties"));
+    m_messageDock->setWindowTitle(tr("Messages"));
+    m_resultsDock->setWindowTitle(tr("Solver Results"));
+    if (m_legendDock)
+        m_legendDock->setWindowTitle(tr("Legend"));
+
+    // Library search placeholder
+    m_librarySearchBox->setPlaceholderText(tr("Filter components..."));
+
+    // Window title
+    setWindowTitle(tr("Liquid Rocket Engine Piping Designer"));
+
+    // Refresh library model (re-translates component names at display time)
+    m_libraryModel->retranslate();
+
+    // Refresh property editor (re-translates property labels)
+    m_propertyEditor->retranslate();
 }
 
 // ─── Plugin loading ──────────────────────────────────────────
@@ -345,8 +403,8 @@ void MainWindow::createToolBar()
     // ── Boundary condition inputs ──
     m_mainToolBar->addSeparator();
 
-    auto* inletLabel = new QLabel(tr(" P_in:"));
-    m_mainToolBar->addWidget(inletLabel);
+    m_inletPressureLabel = new QLabel(tr(" P_in:"));
+    m_mainToolBar->addWidget(m_inletPressureLabel);
 
     m_inletPressureSpin = new QDoubleSpinBox;
     m_inletPressureSpin->setRange(0.01, 100.0);
@@ -357,8 +415,8 @@ void MainWindow::createToolBar()
     m_inletPressureSpin->setMaximumWidth(110);
     m_mainToolBar->addWidget(m_inletPressureSpin);
 
-    auto* flowLabel = new QLabel(tr(" ṁ:"));
-    m_mainToolBar->addWidget(flowLabel);
+    m_inletFlowLabel = new QLabel(tr(" ṁ:"));
+    m_mainToolBar->addWidget(m_inletFlowLabel);
 
     m_inletFlowSpin = new QDoubleSpinBox;
     m_inletFlowSpin->setRange(0.01, 10000.0);
@@ -370,8 +428,8 @@ void MainWindow::createToolBar()
     m_mainToolBar->addWidget(m_inletFlowSpin);
 
     // ── Fluid type selector ──
-    auto* fluidLabel = new QLabel(tr(" Fluid:"));
-    m_mainToolBar->addWidget(fluidLabel);
+    m_fluidTypeLabel = new QLabel(tr(" Fluid:"));
+    m_mainToolBar->addWidget(m_fluidTypeLabel);
 
     m_fluidTypeCombo = new QComboBox;
     m_fluidTypeCombo->addItem("LOX",       static_cast<int>(FluidType::LOX));
@@ -386,8 +444,8 @@ void MainWindow::createToolBar()
 
     // ── Max pressure drop budget ──
     m_mainToolBar->addSeparator();
-    auto* maxDpLabel = new QLabel(tr(" ΔP_max:"));
-    m_mainToolBar->addWidget(maxDpLabel);
+    m_maxDpLabel = new QLabel(tr(" ΔP_max:"));
+    m_mainToolBar->addWidget(m_maxDpLabel);
 
     m_maxPressureDropSpin = new QDoubleSpinBox;
     m_maxPressureDropSpin->setRange(0.0, 100.0);
@@ -736,6 +794,17 @@ void MainWindow::onRunAnalysis()
         .arg(tsResult.minSafetyFactor, 0, 'f', 2)
         .arg(tsResult.edgesWithYieldExceeded));
 
+    // Run blowdown transient simulation (tank pressurant decay)
+    {
+        BlowdownSolver blowdownSolver;
+        blowdownSolver.setTimeStep(0.5);
+        blowdownSolver.setMaxDuration(200.0);
+        BlowdownResult bdResult = blowdownSolver.simulate(
+            m_blockScene, solverSettings, inletPressurePa, inletMassFlow);
+        m_resultsDock->setBlowdownResults(bdResult);
+        appendMessage(bdResult.message);
+    }
+
     // Run extended design checks including pipe stress
     DesignCheckResult extDesignResult = runDesignChecks(
         m_blockScene, sol, solverSettings, maxDpPa, tsResult);
@@ -838,6 +907,9 @@ void MainWindow::onPreferences()
 {
     PreferencesDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) {
+        // Apply language change if user switched it
+        QString lang = QSettings().value("Preferences/Language", "en_US").toString();
+        Application::switchLanguage(lang);
         m_blockView->viewport()->update();
         appendMessage("Preferences updated.");
     }

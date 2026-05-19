@@ -1,6 +1,7 @@
 #include "PreferencesDialog.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
@@ -47,6 +48,17 @@ PreferencesDialog::PreferencesDialog(QWidget* parent)
     displayLayout->addRow(m_antialiasing);
 
     mainLayout->addWidget(displayGroup);
+
+    // Language settings
+    auto* langGroup = new QGroupBox(tr("Language"));
+    auto* langLayout = new QFormLayout(langGroup);
+
+    m_languageCombo = new QComboBox;
+    m_languageCombo->addItem("English", "en_US");
+    m_languageCombo->addItem(QStringLiteral("中文"), "zh_CN");
+    langLayout->addRow(tr("Language:"), m_languageCombo);
+
+    mainLayout->addWidget(langGroup);
 
     // Solver settings
     auto* solverGroup = new QGroupBox(tr("Solver"));
@@ -120,6 +132,11 @@ void PreferencesDialog::loadSettings()
     m_antialiasing->setChecked(s.value("antialiasing", true).toBool());
     s.endGroup();
 
+    // Language
+    QString lang = QSettings().value("Preferences/Language", "en_US").toString();
+    int langIdx = m_languageCombo->findData(lang);
+    if (langIdx >= 0) m_languageCombo->setCurrentIndex(langIdx);
+
     s.beginGroup("Solver");
     m_solverTolerance->setValue(s.value("Tolerance", 1e-6).toDouble());
     m_solverMaxIter->setValue(s.value("MaxIter", 200).toInt());
@@ -139,6 +156,10 @@ void PreferencesDialog::saveSettings()
     s.setValue("defaultZoom", m_defaultZoom->value());
     s.setValue("antialiasing", m_antialiasing->isChecked());
     s.endGroup();
+
+    // Language preference saved to QSettings; applied by MainWindow after accept
+    QString newLang = m_languageCombo->currentData().toString();
+    QSettings().setValue("Preferences/Language", newLang);
 
     s.beginGroup("Solver");
     s.setValue("Tolerance", m_solverTolerance->value());

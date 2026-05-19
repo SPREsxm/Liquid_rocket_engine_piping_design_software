@@ -181,9 +181,12 @@ bool BlockScene::canConnect(PortItem* source, PortItem* dest) const
     if (!source || !dest) return false;
     if (source == dest) return false;
 
-    // Source must be output, dest must be input
-    if (source->direction() != PortDirection::Output ||
-        dest->direction()   != PortDirection::Input) {
+    // Source must be Output or Bidirectional, dest must be Input or Bidirectional
+    auto srcOk = source->direction() == PortDirection::Output
+              || source->direction() == PortDirection::Bidirectional;
+    auto dstOk = dest->direction() == PortDirection::Input
+              || dest->direction() == PortDirection::Bidirectional;
+    if (!srcOk || !dstOk) {
         return false;
     }
 
@@ -249,7 +252,8 @@ void BlockScene::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         PortItem* port = portAtPos(event->scenePos());
-        if (port && port->direction() == PortDirection::Output) {
+        if (port && (port->direction() == PortDirection::Output
+                  || port->direction() == PortDirection::Bidirectional)) {
             m_drawingConnection = true;
             m_connectionSource = port;
             // If port already has a connection, remember it for reconnect
@@ -361,7 +365,9 @@ void BlockScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
         // Try to connect
         if (m_connectionSource) {
             PortItem* target = portAtPos(event->scenePos());
-            bool valid = target && target->direction() == PortDirection::Input
+            bool valid = target
+                        && (target->direction() == PortDirection::Input
+                         || target->direction() == PortDirection::Bidirectional)
                         && m_connectionSource != target
                         && m_connectionSource->parentBlock() != target->parentBlock();
 

@@ -31,6 +31,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
 private:
     void createActions();
@@ -41,6 +42,7 @@ private:
     void createCentralWidget();
     void saveSettings();
     void restoreSettings();
+    void retranslateUi();
 
     // File actions
     void onNew();
@@ -98,6 +100,10 @@ private:
     QLabel* m_zoomLabel   = nullptr;
 
     // Boundary condition inputs
+    QLabel* m_inletPressureLabel = nullptr;
+    QLabel* m_inletFlowLabel = nullptr;
+    QLabel* m_fluidTypeLabel = nullptr;
+    QLabel* m_maxDpLabel = nullptr;
     QDoubleSpinBox* m_inletPressureSpin = nullptr;
     QDoubleSpinBox* m_inletFlowSpin = nullptr;
     QDoubleSpinBox* m_maxPressureDropSpin = nullptr;

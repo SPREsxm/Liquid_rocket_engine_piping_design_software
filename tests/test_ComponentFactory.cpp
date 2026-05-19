@@ -103,5 +103,5 @@ TEST_CASE("Nozzle has chamber properties") {
 
 TEST_CASE("Combustion category has correct count") {
     auto comps = ComponentFactory::instance().componentsInCategory("Combustion");
-    REQUIRE(comps.size() == 5);
+    REQUIRE(comps.size() == 7);
 }

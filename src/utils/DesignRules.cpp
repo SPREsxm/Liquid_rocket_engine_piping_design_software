@@ -1,4 +1,5 @@
 #include "DesignRules.h"
+#include <QCoreApplication>
 #include "PipeScheduleDatabase.h"
 #include "PropellantProperties.h"
 #include "NetworkSolver.h"
@@ -26,36 +27,57 @@ static double velocityLimit(FluidType ft)
     }
 }
 
-static const char* fluidTypeName(FluidType ft)
+static QString fluidTypeName(FluidType ft)
 {
     switch (ft) {
-    case FluidType::LOX:  return "LOX";
-    case FluidType::RP1:  return "RP-1";
-    case FluidType::LH2:  return "LH2";
-    case FluidType::CH4:  return "CH4";
-    case FluidType::Water:return "Water";
-    default:              return "Unknown";
+    case FluidType::LOX:  return QCoreApplication::translate("DesignRules", "LOX");
+    case FluidType::RP1:  return QCoreApplication::translate("DesignRules", "RP-1");
+    case FluidType::LH2:  return QCoreApplication::translate("DesignRules", "LH2");
+    case FluidType::CH4:  return QCoreApplication::translate("DesignRules", "CH4");
+    case FluidType::Water:return QCoreApplication::translate("DesignRules", "Water");
+    default:              return QCoreApplication::translate("DesignRules", "Unknown");
     }
 }
 
-static double getPipeDiameter(BlockItem* block)
+// Inner diameter for flow area calculations (velocity, Re)
+static double getPipeInnerDiameter(BlockItem* block)
 {
     if (!block) return 0.05;
-    // Try diameter property first
+    // Try diameter property first (typically set to ID by optimizer or user)
     QVariant dia = block->propertyValue("diameter");
     if (dia.isValid() && dia.toDouble() > 0.0)
         return dia.toDouble();
-    // Try NPS lookup
+    // Resolve from NPS/schedule → inner diameter
+    QVariant nps = block->propertyValue("nps");
+    QVariant sch = block->propertyValue("schedule");
+    if (nps.isValid() && sch.isValid()) {
+        double npsVal = nps.toDouble();
+        if (npsVal > 0.0) {
+            auto id = PipeScheduleDatabase::instance().innerDiameter(npsVal, sch.toString());
+            if (id.has_value()) return id.value() / 1000.0; // mm→m
+        }
+    }
+    return 0.05; // default fallback
+}
+
+// Outer diameter for ASME B31.3 wall thickness formula
+static double getPipeOuterDiameter(BlockItem* block)
+{
+    if (!block) return 0.05;
     QVariant nps = block->propertyValue("nps");
     QVariant sch = block->propertyValue("schedule");
     if (nps.isValid() && sch.isValid()) {
         double npsVal = nps.toDouble();
         if (npsVal > 0.0) {
             auto od = PipeScheduleDatabase::instance().outerDiameter(npsVal, sch.toString());
-            if (od.has_value()) return od.value() / 1000.0; // mm → m
+            if (od.has_value()) return od.value() / 1000.0; // mm→m
         }
     }
-    return 0.05; // default fallback
+    // Fallback: use diameter property or default
+    QVariant dia = block->propertyValue("diameter");
+    if (dia.isValid() && dia.toDouble() > 0.0)
+        return dia.toDouble();
+    return 0.05;
 }
 
 static double getPipeWallThickness(BlockItem* block)
@@ -89,21 +111,21 @@ static void checkFlowVelocity(BlockScene* scene, const NetworkSolution& sol,
 
     for (const auto& edge : sol.edges) {
         BlockItem* srcBlock = scene->blockByUuid(edge.sourceUuid);
-        double dia = getPipeDiameter(srcBlock);
+        double dia = getPipeInnerDiameter(srcBlock);
         double area = M_PI * dia * dia / 4.0;
         if (area <= 0.0) continue;
         double vel = qAbs(edge.massFlowRate) / (rho * area);
 
         if (vel > vLimit * 2.0) {
-            result.items.append({DesignCheckResult::Error, "Flow Velocity",
+            result.items.append({DesignCheckResult::Error, QCoreApplication::translate("DesignRules", "Flow Velocity"),
                 edge.sourceUuid.toString(), edge.sourceUuid,
-                QString("Velocity %1 m/s exceeds %2 limit %3 m/s (>2×)")
+                QString(QCoreApplication::translate("DesignRules", "Velocity %1 m/s exceeds %2 limit %3 m/s (>2×)"))
                     .arg(vel, 0, 'f', 2).arg(fluidTypeName(settings.fluidType)).arg(vLimit),
                 vel, vLimit * 2.0, "m/s"});
         } else if (vel > vLimit) {
-            result.items.append({DesignCheckResult::Warning, "Flow Velocity",
+            result.items.append({DesignCheckResult::Warning, QCoreApplication::translate("DesignRules", "Flow Velocity"),
                 edge.sourceUuid.toString(), edge.sourceUuid,
-                QString("Velocity %1 m/s exceeds %2 limit %3 m/s")
+                QString(QCoreApplication::translate("DesignRules", "Velocity %1 m/s exceeds %2 limit %3 m/s"))
                     .arg(vel, 0, 'f', 2).arg(fluidTypeName(settings.fluidType)).arg(vLimit),
                 vel, vLimit, "m/s"});
         }
@@ -135,7 +157,7 @@ static void checkCavitation(BlockScene* scene, const NetworkSolution& sol,
         pVapor = PropellantProperties::wagnerVaporPressure(373.15, PropellantProperties::wagnerWater());
         break;
     case FluidType::RP1:
-        pVapor = PropellantProperties::wagnerVaporPressure(490.0, PropellantProperties::wagnerRP1());
+        pVapor = PropellantProperties::wagnerVaporPressure(450.0, PropellantProperties::wagnerRP1());
         break;
     default: break;
     }
@@ -150,20 +172,20 @@ static void checkCavitation(BlockScene* scene, const NetworkSolution& sol,
             npshrVar = block->propertyValue("npshRequired");
         double npshr = npshrVar.isValid() ? npshrVar.toDouble() : 0.5;
 
-        double pInlet = node.pressure; // Pa gauge — assume atmospheric reference
-        double npsha = (pInlet + 101325.0 - pVapor) / (rho * g); // convert gauge to absolute
+        double pInlet = node.pressure; // Pa gauge
+        double npsha = (pInlet + settings.tankPressurePa - pVapor) / (rho * g); // convert gauge to absolute
 
         const double margin = 0.5; // m safety margin
         if (npsha < npshr) {
-            result.items.append({DesignCheckResult::Error, "Cavitation (NPSH)",
+            result.items.append({DesignCheckResult::Error, QCoreApplication::translate("DesignRules", "Cavitation (NPSH)"),
                 node.blockLabel, node.blockUuid,
-                QString("NPSHa %1 m < NPSHr %2 m — cavitation risk")
+                QString(QCoreApplication::translate("DesignRules", "NPSHa %1 m < NPSHr %2 m — cavitation risk"))
                     .arg(npsha, 0, 'f', 2).arg(npshr),
                 npsha, npshr, "m"});
         } else if (npsha < npshr + margin) {
-            result.items.append({DesignCheckResult::Warning, "Cavitation (NPSH)",
+            result.items.append({DesignCheckResult::Warning, QCoreApplication::translate("DesignRules", "Cavitation (NPSH)"),
                 node.blockLabel, node.blockUuid,
-                QString("NPSHa %1 m close to NPSHr %2 m (margin < %3 m)")
+                QString(QCoreApplication::translate("DesignRules", "NPSHa %1 m close to NPSHr %2 m (margin < %3 m)"))
                     .arg(npsha, 0, 'f', 2).arg(npshr).arg(margin),
                 npsha, npshr + margin, "m"});
         }
@@ -173,7 +195,7 @@ static void checkCavitation(BlockScene* scene, const NetworkSolution& sol,
 static void checkWallThickness(BlockScene* scene, const NetworkSolution& sol,
                                const SolverSettings&, DesignCheckResult& result)
 {
-    // ASME B31.3: t_min = P*D / (2*S*E + P*Y)
+    // ASME B31.3: t_min = P*D / (2*S*E + 2*P*Y)  (for t < D/6)
     const double S = 115.0e6;   // 304L SS allowable stress @ 200°C (Pa)
     const double E = 1.0;       // joint factor (seamless)
     const double Y = 0.4;       // temperature coefficient
@@ -186,24 +208,24 @@ static void checkWallThickness(BlockScene* scene, const NetworkSolution& sol,
         double wallThick = getPipeWallThickness(block);
         if (wallThick <= 0.0) continue; // not a pipe with schedule
 
-        double od = getPipeDiameter(block); // OD for scheduled pipe
+        double od = getPipeOuterDiameter(block);
         double pressure = qMax(node.pressure, 1.0e5); // at least 1 bar design
 
-        double tMin = pressure * od / (2.0 * S * E + pressure * Y);
+        double tMin = pressure * od / (2.0 * S * E + 2.0 * pressure * Y);
         double tRequired = tMin + corrAllowance;
 
         if (wallThick < tMin) {
-            result.items.append({DesignCheckResult::Error, "Wall Thickness (ASME B31.3)",
+            result.items.append({DesignCheckResult::Error, QCoreApplication::translate("DesignRules", "Wall Thickness (ASME B31.3)"),
                 node.blockLabel, node.blockUuid,
-                QString("Wall %1 mm < ASME B31.3 t_min %2 mm @ %3 MPa")
+                QString(QCoreApplication::translate("DesignRules", "Wall %1 mm < ASME B31.3 t_min %2 mm @ %3 MPa"))
                     .arg(wallThick * 1000.0, 0, 'f', 2)
                     .arg(tMin * 1000.0, 0, 'f', 2)
                     .arg(pressure / 1.0e6, 0, 'f', 3),
                 wallThick * 1000.0, tMin * 1000.0, "mm"});
         } else if (wallThick < tRequired) {
-            result.items.append({DesignCheckResult::Warning, "Wall Thickness (ASME B31.3)",
+            result.items.append({DesignCheckResult::Warning, QCoreApplication::translate("DesignRules", "Wall Thickness (ASME B31.3)"),
                 node.blockLabel, node.blockUuid,
-                QString("Wall %1 mm < t_min+corrosion %2 mm")
+                QString(QCoreApplication::translate("DesignRules", "Wall %1 mm < t_min+corrosion %2 mm"))
                     .arg(wallThick * 1000.0, 0, 'f', 2)
                     .arg(tRequired * 1000.0, 0, 'f', 2),
                 wallThick * 1000.0, tRequired * 1000.0, "mm"});
@@ -218,9 +240,9 @@ static void checkPressureDropBudget(BlockScene*, const NetworkSolution& sol,
 
     double totalDp = sol.totalPressureDrop;
     if (totalDp > maxDp) {
-        result.items.append({DesignCheckResult::Error, "Pressure Drop Budget",
+        result.items.append({DesignCheckResult::Error, QCoreApplication::translate("DesignRules", "Pressure Drop Budget"),
             "System", {},
-            QString("Total ΔP %1 MPa exceeds budget %2 MPa")
+            QString(QCoreApplication::translate("DesignRules", "Total ΔP %1 MPa exceeds budget %2 MPa"))
                 .arg(totalDp / 1.0e6, 0, 'f', 3).arg(maxDp / 1.0e6, 0, 'f', 3),
             totalDp, maxDp, "Pa"});
     }
@@ -253,15 +275,15 @@ static void checkPipeStress(const ThermalStressResult& tsr,
 {
     for (const auto& te : tsr.edges) {
         if (te.safetyFactor < 1.5 && te.safetyFactor >= 1.0) {
-            result.items.append({DesignCheckResult::Warning, "Pipe Stress (FSI)",
+            result.items.append({DesignCheckResult::Warning, QCoreApplication::translate("DesignRules", "Pipe Stress (FSI)"),
                 QString(), te.sourceUuid,
-                QString("Safety factor %1 < 1.5 (material: %2)")
+                QString(QCoreApplication::translate("DesignRules", "Safety factor %1 < 1.5 (material: %2)"))
                     .arg(te.safetyFactor, 0, 'f', 2).arg(te.materialUsed),
                 te.safetyFactor, 1.5, "—"});
         } else if (te.safetyFactor < 1.0) {
-            result.items.append({DesignCheckResult::Error, "Pipe Stress (FSI)",
+            result.items.append({DesignCheckResult::Error, QCoreApplication::translate("DesignRules", "Pipe Stress (FSI)"),
                 QString(), te.sourceUuid,
-                QString("YIELD EXCEEDED: safety factor %1 (material: %2, σ_vm=%3 MPa)")
+                QString(QCoreApplication::translate("DesignRules", "YIELD EXCEEDED: safety factor %1 (material: %2, σ_vm=%3 MPa)"))
                     .arg(te.safetyFactor, 0, 'f', 2)
                     .arg(te.materialUsed)
                     .arg(te.vonMisesStress_Pa / 1.0e6, 0, 'f', 1),

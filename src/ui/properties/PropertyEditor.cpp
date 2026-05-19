@@ -6,6 +6,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
@@ -77,6 +78,15 @@ void PropertyEditor::clearProperties()
     m_formLayout->addRow(m_emptyLabel);
     m_currentBlock = nullptr;
     m_currentBlocks.clear();
+}
+
+void PropertyEditor::retranslate()
+{
+    setWindowTitle(tr("Properties"));
+    if (!m_currentBlocks.isEmpty())
+        showBlocksProperties(m_currentBlocks);
+    else
+        clearProperties();
 }
 
 bool PropertyEditor::allSameType(const QList<BlockItem*>& blocks) const
@@ -239,7 +249,7 @@ void PropertyEditor::rebuildForm(BlockItem* block)
         }
 
         if (editor) {
-            m_formLayout->addRow(prop.displayName + ":", editor);
+            m_formLayout->addRow(QCoreApplication::translate("ComponentDescriptor", prop.displayName.toUtf8().constData()) + ":", editor);
         }
     }
 
@@ -311,7 +321,7 @@ void PropertyEditor::rebuildFormBatch(const QList<BlockItem*>& blocks)
             // Values differ — show "varies" placeholder
             auto* variesLabel = new QLabel(tr("— varies —"));
             variesLabel->setStyleSheet("color: #9E9E9E; font-style: italic;");
-            m_formLayout->addRow(prop.displayName + ":", variesLabel);
+            m_formLayout->addRow(QCoreApplication::translate("ComponentDescriptor", prop.displayName.toUtf8().constData()) + ":", variesLabel);
             continue;
         }
 
@@ -431,7 +441,7 @@ void PropertyEditor::rebuildFormBatch(const QList<BlockItem*>& blocks)
         }
 
         if (editor) {
-            m_formLayout->addRow(prop.displayName + ":", editor);
+            m_formLayout->addRow(QCoreApplication::translate("ComponentDescriptor", prop.displayName.toUtf8().constData()) + ":", editor);
         }
     }
 

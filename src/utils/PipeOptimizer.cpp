@@ -71,8 +71,8 @@ OptimizationResult optimizePipeSchedules(
     QHash<QUuid, double> curNPS = saveOrigNPS;
     QHash<QUuid, QString> curSchedule = saveOrigSchedule;
 
-    // ── Greedy optimization: 3 passes ─────────────────────────
-    constexpr int kMaxPasses = 3;
+    // ── Greedy optimization: iterate until convergence ────────
+    constexpr int kMaxPasses = 10;
     QSet<QUuid> improved;  // pipes improved this pass
 
     for (int pass = 0; pass < kMaxPasses; ++pass) {
@@ -97,15 +97,16 @@ OptimizationResult optimizePipeSchedules(
                 const QStringList schedules = db.schedulesForSize(nps);
                 for (const auto& sch : schedules) {
                     double w = pipeWeight_kg(nps, sch, length);
-                    // Skip if heavier than current best (or heavier than original,
-                    // unless we've already found a lighter valid one)
+                    // Skip if heavier than current best
                     if (foundValid && w >= bestWeight) continue;
-                    if (!foundValid && w > bestWeight * 1.1) continue;
 
-                    // Apply candidate (only NPS+schedule; diameter
-                    // is derived from schedule DB by downstream checks)
+                    // Apply candidate (NPS + schedule + inner diameter
+                    // so solver sees new geometry)
                     pipe->setPropertyValue("nps", nps);
                     pipe->setPropertyValue("schedule", sch);
+                    auto innerD = db.innerDiameter(nps, sch);
+                    if (innerD.has_value())
+                        pipe->setPropertyValue("diameter", innerD.value() / 1000.0);
 
                     // Re-solve network
                     NetworkSolution sol = solveNetworkAuto(

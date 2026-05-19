@@ -65,15 +65,31 @@ void PortItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
     }
     QColor border = BlockAppearance::portBorderColor();
 
+    const bool bidir = m_direction == PortDirection::Bidirectional;
+
     if (m_highlighted || m_connection) {
         const qreal r = BlockAppearance::PORT_HOVER_RADIUS;
         painter->setPen(QPen(BlockAppearance::portHighlightColor(), 2.5));
         painter->setBrush(BlockAppearance::portHighlightColor().lighter(160));
-        painter->drawEllipse(QPointF(0, 0), r, r);
+        if (bidir) {
+            QPolygonF diamond;
+            diamond << QPointF(0, -r) << QPointF(r, 0)
+                    << QPointF(0, r)  << QPointF(-r, 0);
+            painter->drawPolygon(diamond);
+        } else {
+            painter->drawEllipse(QPointF(0, 0), r, r);
+        }
     } else {
         painter->setPen(QPen(border, 1.5));
         painter->setBrush(fill);
         const qreal r = BlockAppearance::PORT_RADIUS;
-        painter->drawEllipse(QPointF(0, 0), r, r);
+        if (bidir) {
+            QPolygonF diamond;
+            diamond << QPointF(0, -r) << QPointF(r, 0)
+                    << QPointF(0, r)  << QPointF(-r, 0);
+            painter->drawPolygon(diamond);
+        } else {
+            painter->drawEllipse(QPointF(0, 0), r, r);
+        }
     }
 }

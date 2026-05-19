@@ -35,6 +35,15 @@ PortDescriptor outPort(const QString& id, const QString& name,
     return p;
 }
 
+PortDescriptor bidirPort(const QString& id, const QString& name,
+                         PortDataType dataType = PortDataType::Fluid)
+{
+    PortDescriptor p;
+    p.id = id; p.displayName = name;
+    p.direction = PortDirection::Bidirectional; p.dataType = dataType;
+    return p;
+}
+
 } // anonymous namespace
 
 // ─── Pipes ──────────────────────────────────────────────────
@@ -103,10 +112,10 @@ ComponentDescriptor ComponentDescriptor::createTee()
     cd.displayName = "Tee";
     cd.category = "Pipes";
     cd.description = "A three-way pipe junction";
-    cd.inputPorts  = { inPort("inlet", "Inlet") };
+    cd.inputPorts  = { bidirPort("inlet", "Inlet") };
     cd.outputPorts = {
-        outPort("outlet_a", "Outlet A"),
-        outPort("outlet_b", "Outlet B")
+        bidirPort("outlet_a", "Outlet A"),
+        bidirPort("outlet_b", "Outlet B")
     };
     cd.properties = {
         prop("diameter", "Diameter", PropertyType::Double, 0.05, 0.001, 1.0, "m"),
@@ -142,10 +151,10 @@ ComponentDescriptor ComponentDescriptor::createTeeStraight()
     cd.displayName = "Tee (Straight-Through)";
     cd.category = "Pipes";
     cd.description = "Tee with flow straight through (not branching)";
-    cd.inputPorts  = { inPort("inlet", "Inlet") };
+    cd.inputPorts  = { bidirPort("inlet", "Inlet") };
     cd.outputPorts = {
-        outPort("outlet_straight", "Straight Outlet"),
-        outPort("outlet_branch", "Branch Outlet")
+        bidirPort("outlet_straight", "Straight Outlet"),
+        bidirPort("outlet_branch", "Branch Outlet")
     };
     cd.properties = {
         prop("diameter", "Diameter", PropertyType::Double, 0.05, 0.001, 1.0, "m"),
@@ -316,9 +325,12 @@ ComponentDescriptor ComponentDescriptor::createStorageTank()
     cd.inputPorts  = {};
     cd.outputPorts = { outPort("outlet", "Outlet") };
     cd.properties = {
-        prop("volume",       "Volume",        PropertyType::Double, 10.0,  0.01, 10000.0, "m^3"),
-        prop("designPressure","Design Pressure",PropertyType::Double, 5.0e5, 0.0, 1.0e8, "Pa"),
-        prop("material",     "Material",      PropertyType::String, "Aluminum 2219", {}, {}, "")
+        prop("volume",          "Volume",                   PropertyType::Double, 10.0,   0.01, 10000.0, "m^3"),
+        prop("designPressure",  "Design Pressure",          PropertyType::Double, 5.0e5,  0.0,  1.0e8,  "Pa"),
+        prop("material",        "Material",                 PropertyType::String, "Aluminum 2219", {}, {}, ""),
+        prop("storedMass",      "Stored Propellant Mass",   PropertyType::Double, 9128.0, 0.1,  1e6,    "kg"),
+        prop("ullagePressure",  "Initial Ullage Pressure",  PropertyType::Double, 10.0e6, 1.0e5, 5.0e7, "Pa"),
+        prop("ullageFraction",  "Ullage Volume Fraction",   PropertyType::Double, 0.2,    0.01, 0.9,   "")
     };
     return cd;
 }
@@ -662,11 +674,11 @@ ComponentDescriptor ComponentDescriptor::createCrossFitting()
     cd.displayName = "Cross Fitting";
     cd.category = "Pipes";
     cd.description = "A four-way pipe cross connector for splitting or combining flow";
-    cd.inputPorts  = { inPort("inlet", "Inlet") };
+    cd.inputPorts  = { bidirPort("inlet", "Inlet") };
     cd.outputPorts = {
-        outPort("outA", "Branch A"),
-        outPort("outB", "Branch B"),
-        outPort("outC", "Branch C")
+        bidirPort("outA", "Branch A"),
+        bidirPort("outB", "Branch B"),
+        bidirPort("outC", "Branch C")
     };
     cd.properties = {
         prop("diameter",     "Diameter",      PropertyType::Double, 0.05,  0.001, 1.0,   "m"),
@@ -934,6 +946,42 @@ ComponentDescriptor ComponentDescriptor::createFlowMeter()
         prop("rangeHigh", "Range High", PropertyType::Double, 100.0, 0.0,   10000.0, "kg/s"),
         prop("accuracy",  "Accuracy",   PropertyType::Double, 0.25,  0.01,  10.0,    "%"),
         prop("diameter",  "Pipe Diameter",PropertyType::Double, 0.05, 0.005, 0.5,    "m")
+    };
+    return cd;
+}
+
+// ─── 2.6 燃烧室出口边界 ───────────────────────────────────────
+
+ComponentDescriptor ComponentDescriptor::createFuelOutlet()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "chamber.fuelOutlet";
+    cd.displayName = "Fuel Outlet";
+    cd.category = "Combustion";
+    cd.description = "Fuel outlet boundary — represents where fuel exits "
+                     "the piping system into the combustion chamber at a known back-pressure";
+    cd.inputPorts  = { inPort("inlet", "Fuel Inlet") };
+    cd.outputPorts = {};
+    cd.properties = {
+        prop("outletFlowRate",            "Outlet Flow Rate",            PropertyType::Double, 30.0,  0.01,  10000.0, "kg/s"),
+        prop("outletEnvironmentPressure", "Outlet Environment Pressure", PropertyType::Double, 7.0e6, 1.0e5, 3.0e7,  "Pa")
+    };
+    return cd;
+}
+
+ComponentDescriptor ComponentDescriptor::createOxidizerOutlet()
+{
+    ComponentDescriptor cd;
+    cd.typeId = "chamber.oxidizerOutlet";
+    cd.displayName = "Oxidizer Outlet";
+    cd.category = "Combustion";
+    cd.description = "Oxidizer outlet boundary — represents where oxidizer exits "
+                     "the piping system into the combustion chamber at a known back-pressure";
+    cd.inputPorts  = { inPort("inlet", "Oxidizer Inlet") };
+    cd.outputPorts = {};
+    cd.properties = {
+        prop("outletFlowRate",            "Outlet Flow Rate",            PropertyType::Double, 80.0,  0.01,  10000.0, "kg/s"),
+        prop("outletEnvironmentPressure", "Outlet Environment Pressure", PropertyType::Double, 7.0e6, 1.0e5, 3.0e7,  "Pa")
     };
     return cd;
 }

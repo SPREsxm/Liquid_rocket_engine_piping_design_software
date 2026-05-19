@@ -349,3 +349,127 @@ TEST_CASE("NetworkSolution minPressure and maxPressure", "[NetworkSolver]") {
 
     delete scene;
 }
+
+// ─── Outlet boundary condition tests (Phase 27) ─────────────────
+
+namespace {
+    BlockScene* createOutletPipeline() {
+        auto& factory = ComponentFactory::instance();
+        auto* scene = new BlockScene(&factory);
+        auto* tank   = scene->addBlock(ComponentDescriptor::createStorageTank(), QPointF(0, 0));
+        auto* pipe   = scene->addBlock(ComponentDescriptor::createStraightPipe(), QPointF(150, 0));
+        auto* outlet = scene->addBlock(ComponentDescriptor::createFuelOutlet(), QPointF(300, 0));
+
+        scene->addConnection(tank->outputPorts().first(), pipe->inputPorts().first());
+        scene->addConnection(pipe->outputPorts().first(), outlet->inputPorts().first());
+
+        return scene;
+    }
+}
+
+TEST_CASE("Outlet pipeline: BFS solver clamps outlet pressure", "[NetworkSolver][Outlet]") {
+    auto* scene = createOutletPipeline();
+    auto sol = solveNetwork(scene, 1e6, 10.0);
+    REQUIRE(sol.converged == true);
+    REQUIRE(sol.nodes.size() == 3);
+
+    // Find the outlet node and verify its pressure is clamped
+    bool foundOutlet = false;
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.fuelOutlet") {
+            foundOutlet = true;
+            REQUIRE(node.pressure == Catch::Approx(7.0e6).margin(1.0));
+        }
+    }
+    REQUIRE(foundOutlet);
+    delete scene;
+}
+
+TEST_CASE("Outlet pipeline: Hardy-Cross solver clamps outlet pressure", "[NetworkSolver][Outlet]") {
+    auto* scene = createOutletPipeline();
+    auto sol = solveNetworkHardyCross(scene, 1e6, 10.0, 200, 1e-6);
+    REQUIRE(sol.converged == true);
+
+    bool foundOutlet = false;
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.fuelOutlet") {
+            foundOutlet = true;
+            REQUIRE(node.pressure == Catch::Approx(7.0e6).margin(1.0));
+        }
+    }
+    REQUIRE(foundOutlet);
+    delete scene;
+}
+
+TEST_CASE("Outlet pipeline: Matrix solver clamps outlet pressure", "[NetworkSolver][Outlet]") {
+    auto* scene = createOutletPipeline();
+    auto sol = solveNetworkMatrix(scene, 1e6, 10.0);
+    REQUIRE(sol.converged == true);
+
+    bool foundOutlet = false;
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.fuelOutlet") {
+            foundOutlet = true;
+            REQUIRE(node.pressure == Catch::Approx(7.0e6).margin(1.0));
+        }
+    }
+    REQUIRE(foundOutlet);
+    delete scene;
+}
+
+TEST_CASE("Outlet pipeline: Auto solver clamps outlet pressure", "[NetworkSolver][Outlet]") {
+    auto* scene = createOutletPipeline();
+    auto sol = solveNetworkAuto(scene, 1e6, 10.0);
+    REQUIRE(sol.converged == true);
+
+    bool foundOutlet = false;
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.fuelOutlet") {
+            foundOutlet = true;
+            REQUIRE(node.pressure == Catch::Approx(7.0e6).margin(1.0));
+        }
+    }
+    REQUIRE(foundOutlet);
+    delete scene;
+}
+
+TEST_CASE("Outlet pipeline: OxidizerOutlet default pressure is 7 MPa", "[NetworkSolver][Outlet]") {
+    auto& factory = ComponentFactory::instance();
+    BlockScene scene(&factory);
+    auto* tank   = scene.addBlock(ComponentDescriptor::createStorageTank(), QPointF(0, 0));
+    auto* pipe   = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(150, 0));
+    auto* outlet = scene.addBlock(ComponentDescriptor::createOxidizerOutlet(), QPointF(300, 0));
+
+    scene.addConnection(tank->outputPorts().first(), pipe->inputPorts().first());
+    scene.addConnection(pipe->outputPorts().first(), outlet->inputPorts().first());
+
+    auto sol = solveNetworkAuto(&scene, 10e6, 80.0);
+    REQUIRE(sol.converged == true);
+
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.oxidizerOutlet") {
+            REQUIRE(node.pressure == Catch::Approx(7.0e6).margin(1.0));
+        }
+    }
+}
+
+TEST_CASE("Outlet pipeline: custom environment pressure is respected", "[NetworkSolver][Outlet]") {
+    auto& factory = ComponentFactory::instance();
+    BlockScene scene(&factory);
+    auto* tank   = scene.addBlock(ComponentDescriptor::createStorageTank(), QPointF(0, 0));
+    auto* pipe   = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(150, 0));
+    auto* outlet = scene.addBlock(ComponentDescriptor::createFuelOutlet(), QPointF(300, 0));
+    outlet->setPropertyValue("outletEnvironmentPressure", 5.0e6);
+
+    scene.addConnection(tank->outputPorts().first(), pipe->inputPorts().first());
+    scene.addConnection(pipe->outputPorts().first(), outlet->inputPorts().first());
+
+    auto sol = solveNetworkAuto(&scene, 8e6, 30.0);
+    REQUIRE(sol.converged == true);
+
+    for (const auto& node : sol.nodes) {
+        if (node.blockTypeId == "chamber.fuelOutlet") {
+            REQUIRE(node.pressure == Catch::Approx(5.0e6).margin(1.0));
+        }
+    }
+}

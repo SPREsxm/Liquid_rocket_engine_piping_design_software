@@ -13,6 +13,46 @@ QAction* ActionManager::action(ActionId id) const
     return m_actions.value(id, nullptr);
 }
 
+void ActionManager::retranslate()
+{
+    // File
+    auto a = [this](ActionId id, const QString& text, const QString& tip) {
+        if (auto* act = m_actions.value(id)) {
+            act->setText(text);
+            act->setStatusTip(tip);
+        }
+    };
+    a(ActionId::New,    tr("&New"),    tr("Create a new project"));
+    a(ActionId::Open,   tr("&Open..."), tr("Open an existing project"));
+    a(ActionId::Save,   tr("&Save"),   tr("Save the current project"));
+    a(ActionId::SaveAs, tr("Save &As..."), tr("Save project to a new file"));
+    a(ActionId::Export_,tr("&Export..."), tr("Export to external format"));
+    a(ActionId::Print,  tr("&Print..."),  tr("Print the schematic diagram"));
+    // Edit
+    a(ActionId::Undo, tr("&Undo"), tr("Undo last action"));
+    a(ActionId::Redo, tr("&Redo"), tr("Redo last undone action"));
+    a(ActionId::Cut,  tr("Cu&t"),  tr("Cut selected items"));
+    a(ActionId::Copy, tr("&Copy"), tr("Copy selected items"));
+    a(ActionId::Paste,tr("&Paste"), tr("Paste from clipboard"));
+    a(ActionId::Delete, tr("&Delete"), tr("Delete selected items"));
+    // View
+    a(ActionId::ZoomIn,  tr("Zoom &In"),  tr("Zoom in"));
+    a(ActionId::ZoomOut, tr("Zoom &Out"), tr("Zoom out"));
+    a(ActionId::ZoomFit, tr("Zoom to &Fit"), tr("Fit diagram to window"));
+    a(ActionId::ToggleLibrary, tr("Component &Library"), tr("Show or hide component library"));
+    a(ActionId::ToggleProperties, tr("&Properties"), tr("Show or hide property editor"));
+    a(ActionId::ToggleMessages, tr("&Messages"), tr("Show or hide message log"));
+    a(ActionId::ToggleGrid, tr("&Grid"), tr("Show or hide grid"));
+    // Tools
+    a(ActionId::RunAnalysis, tr("&Run Analysis"), tr("Run piping network analysis"));
+    a(ActionId::Validate,    tr("&Validate"),    tr("Validate the piping network"));
+    a(ActionId::GenerateBom, tr("Generate &BOM..."), tr("Generate bill of materials"));
+    a(ActionId::OptimizePipes, tr("&Optimize Pipes..."), tr("Optimize pipe schedules for minimum weight"));
+    a(ActionId::Preferences, tr("&Preferences..."), tr("Open preferences"));
+    // Help
+    a(ActionId::About, tr("&About..."), tr("About this application"));
+}
+
 QAction* ActionManager::add(ActionId id, const QString& text,
                             const QKeySequence& shortcut, const QString& statusTip)
 {

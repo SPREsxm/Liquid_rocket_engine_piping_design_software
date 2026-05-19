@@ -38,11 +38,11 @@ TEST_CASE("validateTopology orphan block emits warning", "[NetworkValidator]") {
 TEST_CASE("validateTopology mandatory port unconnected emits warning", "[NetworkValidator]") {
     auto& factory = ComponentFactory::instance();
     BlockScene scene(&factory);
-    auto* tee  = scene.addBlock(ComponentDescriptor::createTee(), QPointF(0, 0));
-    auto* pipe = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(150, 0));
-    // Connect Tee output → Pipe input, but leave Tee input unconnected
-    // Tee is not orphan (has connection), but its input (mandatory Fluid) is unconnected
-    scene.addConnection(tee->outputPorts().first(), pipe->inputPorts().first());
+    auto* pipeA = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(0, 0));
+    auto* pipeB = scene.addBlock(ComponentDescriptor::createStraightPipe(), QPointF(150, 0));
+    // Connect pipeA output → pipeB input, but leave pipeA input unconnected
+    // StraightPipe input is mandatory Fluid → should warn
+    scene.addConnection(pipeA->outputPorts().first(), pipeB->inputPorts().first());
 
     auto result = validateTopology(&scene);
     bool foundUnconnected = false;

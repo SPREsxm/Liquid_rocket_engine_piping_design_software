@@ -22,6 +22,9 @@ private:
     QDoubleSpinBox* m_defaultZoom;
     QCheckBox* m_antialiasing;
 
+    // Language
+    QComboBox* m_languageCombo;
+
     // Solver
     QDoubleSpinBox* m_solverTolerance;
     QSpinBox* m_solverMaxIter;

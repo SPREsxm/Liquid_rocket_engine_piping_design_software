@@ -18,6 +18,7 @@ public slots:
     void showBlockProperties(BlockItem* block);
     void showBlocksProperties(const QList<BlockItem*>& blocks);
     void clearProperties();
+    void retranslate();
 
 private:
     void rebuildForm(BlockItem* block);

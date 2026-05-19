@@ -9,6 +9,8 @@ class LibraryTreeModel : public QStandardItemModel {
 public:
     explicit LibraryTreeModel(ComponentFactory* factory, QObject* parent = nullptr);
 
+    void retranslate();
+
     // Qt::UserRole + 1 stores the typeId string for leaf items
     enum {
         TypeIdRole = Qt::UserRole + 1
@@ -16,4 +18,5 @@ public:
 
 private:
     void populate(ComponentFactory* factory);
+    ComponentFactory* m_factory = nullptr;
 };
